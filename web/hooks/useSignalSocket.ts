@@ -15,10 +15,10 @@ export function useSignalSocket(onMessage: (msg: WSMessage) => void) {
     const ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080");
     socketRef.current = ws;
 
-    ws.onopen = () => 
+    ws.onopen = () => {
       setConnected(true);
       ws.send(JSON.stringify({ type: "join" }));
-    ;
+    };
 
     ws.onmessage = (evt) => {
       try {

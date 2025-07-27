@@ -1,44 +1,36 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useSignalSocket } from "@/hooks/useSignalSocket";
+import { useCallback, useRef, useState, useEffect } from "react";
 
 export default function StreamPage() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [error, setError]   = useState<string | null>(null);
-  const [media, setMedia]   = useState<MediaStream | null>(null);
+  const [log, setLog] = useState<string[]>([]);
+  const addLog = (l: string) => setLog((prev) => [...prev, l]);
 
+  const { connected, send } = useSignalSocket(
+    useCallback((msg) => addLog(JSON.stringify(msg)), [])
+  );
+
+  const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     navigator.mediaDevices
-      .getUserMedia({ video: { width: 1280, height: 720 }, audio: true })
-      .then((stream) => {
-        setMedia(stream);
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      })
-      .catch((err) => {
-        console.error("getUserMedia()", err);
-        setError("Could not access camera / microphone");
-      });
-
-    return () => {
-      media?.getTracks().forEach((t) => t.stop());
-    };
+      .getUserMedia({ video: true, audio: true })
+      .then((s) => (videoRef.current!.srcObject = s));
   }, []);
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-neutral-900 text-neutral-100">
-      <h1 className="text-2xl font-semibold mb-4">Local Preview</h1>
-      {error && (
-        <p className="mb-3 text-red-400 text-sm">
-          {error}
-        </p>
-      )}
+    <main className="p-6 space-y-4 text-neutral-100 bg-neutral-900 min-h-screen">
       <video
         ref={videoRef}
+        muted
         autoPlay
         playsInline
-        muted
-        className="w-full max-w-xl rounded-xl border border-neutral-700 shadow-lg"
+        className="w-full max-w-md rounded"
       />
+
+      <pre className="bg-neutral-800 p-3 rounded max-h-60 overflow-auto text-xs">
+        {log.join("\n")}
+      </pre>
     </main>
   );
 }

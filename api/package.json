@@ -13,6 +13,7 @@
   "description": "",
   "dependencies": {
     "http": "^0.0.1-security",
+    "tsx": "^4.20.3",
     "uuid": "^11.1.0",
     "ws": "^8.18.3"
   },
