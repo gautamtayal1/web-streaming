@@ -105,8 +105,8 @@ async function startServer() {
               data: { producerId: producer.id }
             }));
 
-            for (const [peerId, peer] of peers) {
-              if (peerId === peerId) continue;
+            for (const [otherPeerId, peer] of peers) {
+              if (otherPeerId === peerId) continue;
               peer.socket.send(JSON.stringify({
                 type: "newProducer",
                 data: { producerId: producer.id, kind }
