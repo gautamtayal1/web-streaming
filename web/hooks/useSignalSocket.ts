@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as mediasoup from "mediasoup-client";
 
 export type WSMessage =
@@ -21,20 +21,25 @@ export type WSMessage =
 export function useSignalSocket(onMessage: (msg: WSMessage) => void) {
   const [connected, setConnected] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
+  const onMessageRef = useRef(onMessage);
+
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
 
   useEffect(() => {
     const ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080");
     socketRef.current = ws;
 
     ws.onopen = () => {
+      console.log("[WebSocket] Connected to server");
       setConnected(true);
-      ws.send(JSON.stringify({ type: "join" }));
     };
 
     ws.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data) as WSMessage;
-        onMessage(msg);
+        onMessageRef.current(msg);
       } catch (e) {
         console.error("Bad WS message", e);
       }
@@ -44,13 +49,13 @@ export function useSignalSocket(onMessage: (msg: WSMessage) => void) {
     ws.onerror  = () => setConnected(false);
 
     return () => ws.close();
-  }, [onMessage]);
+  }, []);
 
-  function send(msg: unknown) {
+  const send = useCallback((msg: unknown) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(msg));
     }
-  }
+  }, []);
 
   return { connected, send };
 }
