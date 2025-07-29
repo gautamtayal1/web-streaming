@@ -24,6 +24,23 @@ async function startServer() {
   });
   console.log("Mediasoup worker created.");
 
+  console.log("Creating WebRTC server...");
+  const webRtcServer = await mediaWorker.createWebRtcServer({
+    listenInfos: [
+      { 
+        protocol: "udp", 
+        ip: "0.0.0.0"
+        // announcedAddress: "88.12.10.41" // Add for production
+      },
+      { 
+        protocol: "tcp", 
+        ip: "0.0.0.0"
+        // announcedAddress: "88.12.10.41" // Add for production
+      }
+    ]
+  });
+  console.log("WebRTC server created.");
+
   console.log("Creating mediasoup router...");
   const mediaRouter = await mediaWorker.createRouter({
     mediaCodecs: [
@@ -35,9 +52,14 @@ async function startServer() {
       },
       {
         kind       : "video",
-        mimeType   : "video/VP8",
+        mimeType   : "video/H264",
         clockRate  : 90000,
-        parameters : {}
+        parameters :
+        {
+          "packetization-mode"      : 1,
+          "profile-level-id"        : "42e01f",
+          "level-asymmetry-allowed" : 1
+        }
       }
     ]
   });
@@ -81,10 +103,9 @@ async function startServer() {
           {
             console.log(`[${peerId}] Creating send transport...`);
             const transport = await mediaRouter.createWebRtcTransport({
-              listenInfos: [{ protocol: "udp", ip: "0.0.0.0" }],
+              webRtcServer: webRtcServer,
               enableUdp: true,
-              enableTcp: true,
-              preferUdp: true
+              enableTcp: false,
             });
             state.sendTransport = transport;
             console.log(`[${peerId}] Send transport created:`, transport.id);
@@ -147,7 +168,7 @@ async function startServer() {
           {
             console.log(`[${peerId}] Creating recv transport...`);
             const transport = await mediaRouter.createWebRtcTransport({
-              listenInfos: [{ protocol: "udp", ip: "0.0.0.0" }],
+              webRtcServer,
               enableUdp: true,
               enableTcp: true,
               preferUdp: true

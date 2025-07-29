@@ -22,17 +22,11 @@ export default function StreamPage() {
         {
           (async () => {
             try {
-              console.log("[routerRtpCapabilities] msg.data:", msg.data);
               const dev = new mediasoupClient.Device();
-              console.log("[routerRtpCapabilities] Created Device:", dev);
               await dev.load({ routerRtpCapabilities: msg.data });
-              console.log("[routerRtpCapabilities] Device loaded successfully");
               setDevice(dev);
-              console.log("[routerRtpCapabilities] Device set, device:", dev);
               setRtpCaps(msg.data);
 
-              // ask backend to create transports after device is loaded
-              console.log("[routerRtpCapabilities] Sending createSendTransport and createRecvTransport");
               send({ type: "createSendTransport" });
               send({ type: "createRecvTransport" });
             } catch (error) {
@@ -183,8 +177,8 @@ export default function StreamPage() {
         console.log("[remoteStream] Attached remote stream with", tracks.length, "tracks");
         console.log("[remoteStream] Video element srcObject set:", remoteVideoRef.current.srcObject);
         console.log("[remoteStream] Video element paused:", remoteVideoRef.current.paused);
-        remoteVideoRef.current.play().catch(console.error);
-        console.log("[remoteStream] Video playing successfully");
+        // remoteVideoRef.current.play().catch(console.error);
+        // console.log("[remoteStream] Video playing successfully");
         
       } else {
         console.warn("[remoteStream] remoteVideoRef.current is null");
@@ -272,6 +266,17 @@ export default function StreamPage() {
           </div>
         </div>
       </div>
+      <button 
+        disabled={consumers.length === 0}
+        onClick={() => {
+          remoteVideoRef.current?.play();
+          console.log("[remoteStream] Video playing successfully");
+          console.log("[remoteStream] Video paused:", remoteVideoRef.current?.paused);
+        }}
+        className="px-4 py-2 bg-blue-500 text-white rounded disabled:bg-gray-300"
+      >
+        Start Remote Stream ({consumers.length} available)
+      </button>
     </div>
   );
 }
