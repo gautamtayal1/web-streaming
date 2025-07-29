@@ -251,12 +251,24 @@ export default function StreamPage() {
       <div className="flex gap-4">
         <div>
           <h2>Your Video</h2>
-          <video ref={localVideoRef} autoPlay muted playsInline className="w-64"/>
+          <video 
+            ref={localVideoRef} 
+            autoPlay 
+            muted 
+            playsInline 
+            className="w-80 h-60 border-4 border-blue-500 bg-gray-200 object-cover"
+          />
         </div>
         <div>
           <h2>Peer Video</h2>
           <div className="relative">
-            <video ref={remoteVideoRef} autoPlay playsInline className="w-64 border-2 border-gray-300" width="360" height="240" muted/>
+            <video 
+              ref={remoteVideoRef} 
+              autoPlay 
+              playsInline 
+              className="w-80 h-60 border-4 border-red-500 object-cover" 
+              
+            />
           </div>
         </div>
       </div>
