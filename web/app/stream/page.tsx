@@ -160,6 +160,21 @@ export default function StreamPage() {
     if (consumers.length > 0) {
       const tracks = consumers.map(consumer => consumer.track);
       console.log("[remoteStream] All tracks:", tracks.map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted, readyState: t.readyState })));
+
+      if (tracks.length === 0) {
+        console.warn("[remoteStream] No tracks found");
+        return;
+      }
+      
+      const videoTracks = tracks.filter(t => t.kind === 'video');
+      const audioTracks = tracks.filter(t => t.kind === 'audio');
+      console.log("[remoteStream] Video tracks:", videoTracks.map(t => ({ id: t.id, enabled: t.enabled, muted: t.muted, readyState: t.readyState })));
+      console.log("[remoteStream] Audio tracks:", audioTracks.map(t => ({ id: t.id, enabled: t.enabled, muted: t.muted, readyState: t.readyState })));
+      if (videoTracks.length === 0) {
+        console.warn("[remoteStream] No video tracks found");
+        return;
+      }
+
       const stream = new MediaStream(tracks);
       setRemoteStream(stream);
       if (remoteVideoRef.current) {
@@ -168,6 +183,8 @@ export default function StreamPage() {
         console.log("[remoteStream] Attached remote stream with", tracks.length, "tracks");
         console.log("[remoteStream] Video element srcObject set:", remoteVideoRef.current.srcObject);
         console.log("[remoteStream] Video element paused:", remoteVideoRef.current.paused);
+        remoteVideoRef.current.play().catch(console.error);
+        console.log("[remoteStream] Video playing successfully");
         
       } else {
         console.warn("[remoteStream] remoteVideoRef.current is null");
@@ -239,7 +256,7 @@ export default function StreamPage() {
         <div>
           <h2>Peer Video</h2>
           <div className="relative">
-            <video ref={remoteVideoRef} autoPlay playsInline className="w-64" width="256" height="192"/>
+            <video ref={remoteVideoRef} autoPlay playsInline className="w-64 border-2 border-gray-300" width="360" height="240" muted/>
           </div>
         </div>
       </div>
