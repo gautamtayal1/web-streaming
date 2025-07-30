@@ -52,6 +52,18 @@ async function startServer() {
       },
       {
         kind       : "video",
+        mimeType   : "video/VP8",
+        clockRate  : 90000,
+        parameters : {},
+        rtcpFeedback: [
+          { type: "nack" },
+          { type: "nack", parameter: "pli" },
+          { type: "ccm", parameter: "fir" },
+          { type: "goog-remb" }
+        ]
+      },
+      {
+        kind       : "video",
         mimeType   : "video/H264",
         clockRate  : 90000,
         parameters :
@@ -217,10 +229,24 @@ async function startServer() {
             const consumer = await state.recvTransport.consume({
               producerId,
               rtpCapabilities,
-              paused: false
+              paused: true  // Create paused as recommended
             });
+            
+            // CRITICAL: Resume the consumer immediately
+            await consumer.resume();
+            console.log(`[${peerId}] Consumer resumed`);
+            
+            // Debug consumer state
+            console.log(`[${peerId}] Consumer debug:`, {
+              id: consumer.id,
+              kind: consumer.kind,
+              paused: consumer.paused,
+              producerPaused: consumer.producerPaused,
+              score: consumer.score
+            });
+            
             state.consumers.push(consumer);
-            console.log(`[${peerId}] Consumer created:`, consumer.id);
+            console.log(`[${peerId}] Consumer created and resumed:`, consumer.id);
 
             socket.send(JSON.stringify({
               type: "consumed",

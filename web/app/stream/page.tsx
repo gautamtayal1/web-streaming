@@ -62,7 +62,7 @@ export default function StreamPage() {
             console.log("[sendTransport] on produce", { kind, rtpParameters });
             try {
               send({ type: "produce", data: { kind, rtpParameters } });
-              callback({ id: "" }); // id is not used on client side
+              callback({ id: "" });
               console.log("[sendTransport] produce callback called");
             } catch (error) {
               console.error("[sendTransport] produce error:", error);
@@ -139,6 +139,7 @@ export default function StreamPage() {
         break;
 
       case "produced":
+        
         console.log("[produced] Received:", msg.data);
         break;
 
@@ -164,11 +165,9 @@ export default function StreamPage() {
       const audioTracks = tracks.filter(t => t.kind === 'audio');
       console.log("[remoteStream] Video tracks:", videoTracks.map(t => ({ id: t.id, enabled: t.enabled, muted: t.muted, readyState: t.readyState })));
       console.log("[remoteStream] Audio tracks:", audioTracks.map(t => ({ id: t.id, enabled: t.enabled, muted: t.muted, readyState: t.readyState })));
-      if (videoTracks.length === 0) {
-        console.warn("[remoteStream] No video tracks found");
-        return;
-      }
 
+      console.log("[remoteStream] Using", tracks.length, "tracks out of", tracks.length, "total");
+      
       const stream = new MediaStream(tracks);
       setRemoteStream(stream);
       if (remoteVideoRef.current) {
@@ -210,7 +209,25 @@ export default function StreamPage() {
         console.log("[useEffect sendTransport] Producing tracks:", tracks);
         for (const track of tracks) {
           console.log("[useEffect sendTransport] Producing track:", track);
-          await sendTransport.produce({ track });
+          console.log("[useEffect sendTransport] Track details:", {
+            kind: track.kind,
+            enabled: track.enabled,
+            muted: track.muted,
+            readyState: track.readyState,
+            label: track.label
+          });
+          if (!sendTransport) {
+            console.warn("[useEffect sendTransport] No sendTransport available");
+            return;
+          }
+          const producer = await sendTransport.produce({ track });
+          console.log("[useEffect sendTransport] Producer created:", {
+            id: producer.id,
+            kind: producer.kind,
+            paused: producer.paused,
+            track: producer.track
+          });
+          console.log("[useEffect sendTransport] Producer", producer);
           console.log("[useEffect sendTransport] Produced track:", track);
         }
       } catch (error) {
