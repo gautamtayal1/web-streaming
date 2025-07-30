@@ -14,6 +14,7 @@ export default function StreamPage() {
   const [localStream, setLocalStream] = useState<MediaStream>();
   const [remoteStream, setRemoteStream] = useState<MediaStream>();
   const [pendingProducers, setPendingProducers] = useState<string[]>([]);
+  const pendingProduceCallbacksRef = useRef<((data: { id: string }) => void)[]>([]);
 
   const onMessage = useCallback((msg: WSMessage) => {
     console.log("[WSMessage received]", msg);
@@ -61,9 +62,12 @@ export default function StreamPage() {
           transport.on("produce", async ({ kind, rtpParameters }, callback, errback) => {
             console.log("[sendTransport] on produce", { kind, rtpParameters });
             try {
+              // Store callback in ref (immediate, no async state update)
+              pendingProduceCallbacksRef.current.push(callback);
+              console.log("[sendTransport] Stored callback, total pending:", pendingProduceCallbacksRef.current.length);
+              
               send({ type: "produce", data: { kind, rtpParameters } });
-              callback({ id: "" });
-              console.log("[sendTransport] produce callback called");
+              console.log("[sendTransport] Sent produce message, waiting for server producer ID");
             } catch (error) {
               console.error("[sendTransport] produce error:", error);
               errback(error as Error);
@@ -139,8 +143,20 @@ export default function StreamPage() {
         break;
 
       case "produced":
-        
-        console.log("[produced] Received:", msg.data);
+        {
+          const { producerId } = msg.data;
+          console.log("[produced] Got producer ID from server:", producerId);
+          
+          // Get first pending callback and call it with server producer ID
+          console.log("[produced] Available callbacks:", pendingProduceCallbacksRef.current.length);
+          if (pendingProduceCallbacksRef.current.length > 0) {
+            const callback = pendingProduceCallbacksRef.current.shift()!;
+            callback({ id: producerId });
+            console.log("[produced] ✅ Called callback with REAL producer ID from server:", producerId);
+          } else {
+            console.error("[produced] ❌ No pending callbacks for producer ID:", producerId);
+          }
+        }
         break;
 
       default:
@@ -278,7 +294,6 @@ export default function StreamPage() {
               autoPlay 
               playsInline 
               className="w-80 h-60 border-4 border-red-500 object-cover" 
-              
             />
           </div>
         </div>

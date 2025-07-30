@@ -29,12 +29,14 @@ async function startServer() {
     listenInfos: [
       { 
         protocol: "udp", 
-        ip: "0.0.0.0"
+        ip: "0.0.0.0",
+        port: 20000
         // announcedAddress: "88.12.10.41" // Add for production
       },
       { 
         protocol: "tcp", 
-        ip: "0.0.0.0"
+        ip: "0.0.0.0",
+        port: 20000
         // announcedAddress: "88.12.10.41" // Add for production
       }
     ]
