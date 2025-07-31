@@ -1,8 +1,8 @@
 import { spawn, ChildProcess } from "child_process";
 import { join } from "path";
 import { writeFileSync } from "fs";
-import { FFmpegStream } from "../types";
-import { FFMPEG_CONFIG, SERVER_CONFIG } from "../config";
+import { FFmpegStream } from "../utils/types";
+import { FFMPEG_CONFIG, SERVER_CONFIG } from "../utils/config";
 
 export class FFmpegService {
   private hlsDir: string;

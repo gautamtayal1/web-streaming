@@ -1,4 +1,4 @@
-import { Peer } from "../types";
+import { Peer } from "../utils/types";
 import { MediaSoupService } from "./MediaSoupService";
 
 export class WebSocketHandler {

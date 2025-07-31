@@ -1,5 +1,5 @@
 import * as mediasoup from "mediasoup";
-import { MEDIASOUP_CONFIG } from "../config";
+import { MEDIASOUP_CONFIG } from "../utils/config";
 
 export class MediaSoupService {
   private worker!: mediasoup.types.Worker;

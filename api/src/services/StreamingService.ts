@@ -1,4 +1,4 @@
-import { FFmpegStream, Peer } from "../types";
+import { FFmpegStream, Peer } from "../utils/types";
 import { MediaSoupService } from "./MediaSoupService";
 import { FFmpegService } from "./FFmpegService";
 

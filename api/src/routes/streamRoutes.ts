@@ -1,6 +1,6 @@
 import express from "express";
 import { StreamingService } from "../services/StreamingService";
-import { FFmpegStream } from "../types";
+import { FFmpegStream } from "../utils/types";
 
 export function createStreamRoutes(
   streamingService: StreamingService,

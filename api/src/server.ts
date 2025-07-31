@@ -9,8 +9,8 @@ import { FFmpegService } from "./services/FFmpegService";
 import { StreamingService } from "./services/StreamingService";
 import { WebSocketHandler } from "./services/WebSocketHandler";
 import { createStreamRoutes } from "./routes/streamRoutes";
-import { Peer, FFmpegStream } from "./types";
-import { SERVER_CONFIG } from "./config";
+import { Peer, FFmpegStream } from "./utils/types";
+import { SERVER_CONFIG } from "./utils/config";
 
 class StreamingServer {
   private app = express();
