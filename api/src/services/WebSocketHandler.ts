@@ -4,7 +4,8 @@ import { MediaSoupService } from "./MediaSoupService";
 export class WebSocketHandler {
   constructor(
     private mediaSoupService: MediaSoupService,
-    private peers: Map<string, Peer>
+    private peers: Map<string, Peer>,
+    private streamingService: any
   ) {}
 
   async handleMessage(msg: any, peer: Peer, socket: any, peerId: string): Promise<void> {
@@ -62,6 +63,9 @@ export class WebSocketHandler {
     }
     
     peer.producers.push(producer);
+    
+    // Start FFmpeg if this is the first producer (like reference)
+    await this.streamingService.startFFmpegForProducer(producer);
     
     socket.send(JSON.stringify({
       type: "produced",

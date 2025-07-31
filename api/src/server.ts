@@ -31,7 +31,19 @@ class StreamingServer {
   private setupMiddleware(): void {
     this.app.use(cors());
     this.app.use(express.json());
-    this.app.use('/hls', express.static(this.hlsDir));
+    
+    // Serve HLS files with proper headers for streaming
+    this.app.use('/hls', express.static(this.hlsDir, {
+      setHeaders: (res, path) => {
+        if (path.endsWith('.m3u8')) {
+          res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+          res.setHeader('Cache-Control', 'no-cache');
+        } else if (path.endsWith('.ts')) {
+          res.setHeader('Content-Type', 'video/mp2t'); 
+          res.setHeader('Cache-Control', 'no-cache');
+        }
+      }
+    }));
   }
 
   private ensureHlsDirectory(): void {
@@ -50,7 +62,8 @@ class StreamingServer {
 
     this.webSocketHandler = new WebSocketHandler(
       this.mediaSoupService,
-      this.peers
+      this.peers,
+      this.streamingService
     );
   }
 

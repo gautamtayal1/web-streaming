@@ -8,6 +8,11 @@ export function createStreamRoutes(
 ) {
   const router = express.Router();
 
+  // Health check endpoint
+  router.get('/health', (_, res) => {
+    res.json({ status: 'ok' });
+  });
+
   router.post('/create-stream', async (_, res) => {
     const streamId = crypto.randomUUID();
     try {
@@ -16,7 +21,7 @@ export function createStreamRoutes(
       
       res.json({ 
         streamId, 
-        hlsUrl: `/hls/${streamId}.m3u8`,
+        hlsUrl: `/hls/stream.m3u8`, // Use single stream file like in your reference
         ports: {
           videoRtp: ffmpegStream.videoRtpPort,
           videoRtcp: ffmpegStream.videoRtcpPort,
@@ -33,6 +38,20 @@ export function createStreamRoutes(
   router.get('/streams', (_, res) => {
     const activeStreams = streamingService.getActiveStreams();
     res.json({ streams: activeStreams });
+  });
+
+  // Check if HLS stream file exists (for watch page)
+  router.get('/stream-status', (_, res) => {
+    const fs = require('fs');
+    const path = require('path');
+    const hlsDir = path.join(process.cwd(), 'hls');
+    const streamFile = path.join(hlsDir, 'stream.m3u8');
+    
+    const exists = fs.existsSync(streamFile);
+    res.json({ 
+      active: exists,
+      hlsUrl: exists ? '/hls/stream.m3u8' : null 
+    });
   });
 
   return router;
