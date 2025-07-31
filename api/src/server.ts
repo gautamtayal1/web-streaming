@@ -29,15 +29,15 @@ async function startServer() {
     listenInfos: [
       { 
         protocol: "udp", 
-        ip: "0.0.0.0",
-        port: 20000
-        // announcedAddress: "88.12.10.41" // Add for production
+        ip: "127.0.0.1",  // Use localhost for local development
+        port: 20000,
+        announcedAddress: "127.0.0.1"  // Announce localhost for local development
       },
       { 
         protocol: "tcp", 
-        ip: "0.0.0.0",
-        port: 20000
-        // announcedAddress: "88.12.10.41" // Add for production
+        ip: "127.0.0.1",  // Use localhost for local development
+        port: 20001,
+        announcedAddress: "127.0.0.1"  // Announce localhost for local development
       }
     ]
   });
@@ -119,7 +119,8 @@ async function startServer() {
             const transport = await mediaRouter.createWebRtcTransport({
               webRtcServer: webRtcServer,
               enableUdp: true,
-              enableTcp: false,
+              enableTcp: true,
+              preferUdp: true
             });
             state.sendTransport = transport;
             console.log(`[${peerId}] Send transport created:`, transport.id);
@@ -146,6 +147,13 @@ async function startServer() {
             console.log(`[${peerId}] Connecting send transport...`);
             await state.sendTransport.connect({ dtlsParameters: msg.data });
             console.log(`[${peerId}] Send transport connected`);
+            console.log(`[${peerId}] Send transport state:`, {
+              id: state.sendTransport.id,
+              closed: state.sendTransport.closed,
+              iceState: state.sendTransport.iceState,
+              iceSelectedTuple: state.sendTransport.iceSelectedTuple,
+              dtlsState: state.sendTransport.dtlsState
+            });
           }
           break;
 
@@ -158,8 +166,30 @@ async function startServer() {
             const { kind, rtpParameters } = msg.data;
             console.log(`[${peerId}] Producing kind=${kind}...`);
             const producer = await state.sendTransport.produce({ kind, rtpParameters });
+            
+            // Debug producer state before resume
+            console.log(`[${peerId}] Producer created:`, producer.id, `paused: ${producer.paused}`);
+            
+            // Resume producer if it's paused (common cause of no video data)
+            if (producer.paused) {
+              await producer.resume();
+              console.log(`[${peerId}] Producer resumed`);
+            }
+            
             state.producers.push(producer);
-            console.log(`[${peerId}] Producer created:`, producer.id);
+            
+            // Debug final producer state
+            console.log(`[${peerId}] Producer final state:`, {
+              id: producer.id,
+              kind: producer.kind,
+              paused: producer.paused,
+              score: producer.score
+            });
+            
+            // Check producer score after a delay to see if RTP data arrives
+            setTimeout(() => {
+              console.log(`[${peerId}] Producer ${producer.id} score after 3s:`, producer.score);
+            }, 3000);
 
             socket.send(JSON.stringify({
               type: "produced",

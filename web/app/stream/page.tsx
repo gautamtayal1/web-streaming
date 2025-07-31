@@ -168,7 +168,7 @@ export default function StreamPage() {
 
   // Handle remote stream creation from consumers
   useEffect(() => {
-    if (consumers.length > 0) {
+    if (consumers.length >= 1) {
       const tracks = consumers.map(consumer => consumer.track);
       console.log("[remoteStream] All tracks:", tracks.map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted, readyState: t.readyState })));
 
@@ -192,6 +192,32 @@ export default function StreamPage() {
         console.log("[remoteStream] Attached remote stream with", tracks.length, "tracks");
         console.log("[remoteStream] Video element srcObject set:", remoteVideoRef.current.srcObject);
         console.log("[remoteStream] Video element paused:", remoteVideoRef.current.paused);
+        console.log("dimensions", remoteVideoRef.current.videoWidth, remoteVideoRef.current.videoHeight);
+        
+        // Debug video track state
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          console.log("[remoteStream] Video track debug:", {
+            kind: videoTrack.kind,
+            enabled: videoTrack.enabled,
+            muted: videoTrack.muted,
+            readyState: videoTrack.readyState,
+            label: videoTrack.label,
+            settings: videoTrack.getSettings()
+          });
+        }
+        
+        // Try to play the video explicitly
+        remoteVideoRef.current.play().catch(console.error);
+        
+        // Add event listeners to detect when video data arrives
+        remoteVideoRef.current.onloadedmetadata = () => {
+          console.log("[remoteStream] Video metadata loaded - dimensions:", remoteVideoRef.current?.videoWidth, "x", remoteVideoRef.current?.videoHeight);
+        };
+        
+        remoteVideoRef.current.oncanplay = () => {
+          console.log("[remoteStream] Video can play - dimensions:", remoteVideoRef.current?.videoWidth, "x", remoteVideoRef.current?.videoHeight);
+        };
         // remoteVideoRef.current.play().catch(console.error);
         // console.log("[remoteStream] Video playing successfully");
         
@@ -236,15 +262,39 @@ export default function StreamPage() {
             console.warn("[useEffect sendTransport] No sendTransport available");
             return;
           }
-          const producer = await sendTransport.produce({ track });
-          console.log("[useEffect sendTransport] Producer created:", {
-            id: producer.id,
-            kind: producer.kind,
-            paused: producer.paused,
-            track: producer.track
-          });
-          console.log("[useEffect sendTransport] Producer", producer);
-          console.log("[useEffect sendTransport] Produced track:", track);
+          
+          console.log(`[useEffect sendTransport] About to produce ${track.kind} track...`);
+          
+          // Debug track settings before production
+          if (track.kind === 'video') {
+            console.log(`[useEffect sendTransport] Video track settings before production:`, track.getSettings());
+            console.log(`[useEffect sendTransport] Video track constraints:`, track.getConstraints());
+          }
+          
+          try {
+            const producer = await sendTransport.produce({ track });
+            console.log(`[useEffect sendTransport] ✅ ${track.kind} producer created successfully:`, {
+              id: producer.id,
+              kind: producer.kind,
+              paused: producer.paused,
+              track: producer.track
+            });
+            
+            // Debug producer track settings after production
+            if (producer.kind === 'video') {
+              console.log(`[useEffect sendTransport] Video producer track settings:`, producer.track?.getSettings());
+            }
+          } catch (trackError) {
+            console.error(`[useEffect sendTransport] ❌ Failed to produce ${track.kind} track:`, trackError);
+            console.error(`[useEffect sendTransport] Track that failed:`, {
+              kind: track.kind,
+              enabled: track.enabled,
+              muted: track.muted,
+              readyState: track.readyState,
+              label: track.label,
+              settings: track.getSettings()
+            });
+          }
         }
       } catch (error) {
         console.error("Failed to produce:", error);
