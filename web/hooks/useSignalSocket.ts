@@ -32,7 +32,6 @@ export function useSignalSocket(onMessage: (msg: WSMessage) => void) {
     socketRef.current = ws;
 
     ws.onopen = () => {
-      console.log("[WebSocket] Connected to server");
       setConnected(true);
     };
 
