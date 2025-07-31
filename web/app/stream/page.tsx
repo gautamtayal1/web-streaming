@@ -106,7 +106,7 @@ export default function StreamPage() {
                 return;
               }
               const consumer = await recvTransport.consume({ id, producerId, kind, rtpParameters});
-              consumer.resume();
+              await consumer.resume();
               setConsumers(prev => [...prev, consumer]);
             } catch (error) {
               console.error("Failed to consume:", error);
@@ -128,9 +128,9 @@ export default function StreamPage() {
       default:
         break;
     }
-  }, [device, rtpCaps, recvTransport, send]);
+  }, [device, rtpCaps, recvTransport]);
 
-  const { send } = useSignalSocket(onMessage);
+  const { connected, send } = useSignalSocket(onMessage);
 
   useEffect(() => {
     if (consumers.length >= 1) {
@@ -173,7 +173,7 @@ export default function StreamPage() {
           }
           
           try {
-            await sendTransport.produce({ track });
+            const producer = await sendTransport.produce({ track });
           } catch (trackError) {
             console.error(`Failed to produce ${track.kind} track:`, trackError);
           }
