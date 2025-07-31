@@ -1,238 +1,130 @@
-import http from "http";
+import express from "express";
 import { WebSocketServer } from "ws";
-import * as mediasoup from "mediasoup";
+import { join } from "path";
+import { mkdirSync, existsSync } from "fs";
+import cors from "cors";
 
-interface Peer {
-  socket: WebSocket;
-  sendTransport?: mediasoup.types.WebRtcTransport;
-  recvTransport?: mediasoup.types.WebRtcTransport;
-  producers: mediasoup.types.Producer[];
-  consumers: mediasoup.types.Consumer[];
-}
+import { MediaSoupService } from "./services/MediaSoupService";
+import { FFmpegService } from "./services/FFmpegService";
+import { StreamingService } from "./services/StreamingService";
+import { WebSocketHandler } from "./services/WebSocketHandler";
+import { createStreamRoutes } from "./routes/streamRoutes";
+import { Peer, FFmpegStream } from "./types";
+import { SERVER_CONFIG } from "./config";
 
-async function startServer() {
-  const httpServer = http.createServer();
-  const wss        = new WebSocketServer({ server: httpServer });
-  const peers      = new Map<string, Peer>();
+class StreamingServer {
+  private app = express();
+  private peers = new Map<string, Peer>();
+  private ffmpegStreams = new Map<string, FFmpegStream>();
+  private hlsDir = join(process.cwd(), SERVER_CONFIG.hlsDir);
+  
+  private mediaSoupService = new MediaSoupService();
+  private ffmpegService = new FFmpegService();
+  private streamingService!: StreamingService;
+  private webSocketHandler!: WebSocketHandler;
 
-  const mediaWorker = await mediasoup.createWorker({
-    rtcMinPort: 20000,
-    rtcMaxPort: 20200,
-    logLevel: "warn",
-    logTags: ["ice", "dtls", "rtp"]
-  });
+  constructor() {
+    this.setupMiddleware();
+    this.ensureHlsDirectory();
+  }
 
-  const webRtcServer = await mediaWorker.createWebRtcServer({
-    listenInfos: [
-      { 
-        protocol: "udp", 
-        ip: "127.0.0.1",
-        port: 20000,
-      },
-      { 
-        protocol: "tcp", 
-        ip: "127.0.0.1",
-        port: 20001,
-      }
-    ]
-  });
+  private setupMiddleware(): void {
+    this.app.use(cors());
+    this.app.use(express.json());
+    this.app.use('/hls', express.static(this.hlsDir));
+  }
 
-  const mediaRouter = await mediaWorker.createRouter({
-    mediaCodecs: [
-      {
-        kind       : "audio",
-        mimeType   : "audio/opus",
-        clockRate  : 48000,
-        channels   : 2
-      },
-      {
-        kind       : "video",
-        mimeType   : "video/VP8",
-        clockRate  : 90000,
-        parameters : {},
-        rtcpFeedback: [
-          { type: "nack" },
-          { type: "nack", parameter: "pli" },
-          { type: "ccm", parameter: "fir" },
-          { type: "goog-remb" }
-        ]
-      },
-      {
-        kind       : "video",
-        mimeType   : "video/H264",
-        clockRate  : 90000,
-        parameters :
-        {
-          "packetization-mode"      : 1,
-          "profile-level-id"        : "42e01f",
-          "level-asymmetry-allowed" : 1
-        }
-      }
-    ]
-  });
-
-  wss.on("connection", (socket) => {
-    const peerId = crypto.randomUUID();
-    peers.set(peerId, { socket: socket as unknown as WebSocket, producers: [], consumers: []});
-
-    socket.send(JSON.stringify({
-      type: "routerRtpCapabilities",
-      data: mediaRouter.rtpCapabilities,
-    }));
-
-    for (const [otherPeerId, otherPeer] of peers) {
-      if (otherPeerId === peerId) continue;
-      for (const producer of otherPeer.producers) {
-        socket.send(JSON.stringify({
-          type: "newProducer",
-          data: { producerId: producer.id, kind: producer.kind }
-        }));
-      }
+  private ensureHlsDirectory(): void {
+    if (!existsSync(this.hlsDir)) {
+      mkdirSync(this.hlsDir, { recursive: true });
     }
+  }
 
-    socket.on("message", async (msgRaw) => {
-      const msg = JSON.parse(msgRaw.toString());
-      const state = peers.get(peerId);
-      
-      if (!state) {
-        return;
-      }
+  private initializeServices(): void {
+    this.streamingService = new StreamingService(
+      this.mediaSoupService,
+      this.ffmpegService,
+      this.peers,
+      this.ffmpegStreams
+    );
 
-      switch (msg.type) {
-        case "createSendTransport":
-          {
-            const transport = await mediaRouter.createWebRtcTransport({
-              webRtcServer: webRtcServer,
-              enableUdp: true,
-              enableTcp: true,
-              preferUdp: true
-            });
-            state.sendTransport = transport;
+    this.webSocketHandler = new WebSocketHandler(
+      this.mediaSoupService,
+      this.peers
+    );
+  }
 
-            socket.send(JSON.stringify({
-              type: "sendTransportCreated",
-              data: {
-                id: transport.id,
-                iceParameters    : transport.iceParameters,
-                iceCandidates    : transport.iceCandidates,
-                dtlsParameters   : transport.dtlsParameters
-              }
-            }));
-          }
-          break;
+  private setupRoutes(): void {
+    const streamRoutes = createStreamRoutes(this.streamingService, this.ffmpegStreams);
+    this.app.use('/', streamRoutes);
+  }
 
-        case "connectSendTransport":
-          {
-            if (!state.sendTransport) {
-              return;
-            }
-            await state.sendTransport.connect({ dtlsParameters: msg.data });
-          }
-          break;
+  private setupWebSocketServer(server: any): void {
+    const wss = new WebSocketServer({ server });
+    
+    wss.on("connection", (socket) => {
+      const peerId = crypto.randomUUID();
+      this.peers.set(peerId, { 
+        socket: socket as unknown as WebSocket, 
+        producers: [], 
+        consumers: [] 
+      });
 
-        case "produce":
-          {
-            if (!state.sendTransport) {
-              return;
-            }
-            const { kind, rtpParameters } = msg.data;
-            const producer = await state.sendTransport.produce({ kind, rtpParameters });
-            
-            if (producer.paused) {
-              await producer.resume();
-            }
-            
-            state.producers.push(producer);
+      socket.send(JSON.stringify({
+        type: "routerRtpCapabilities",
+        data: this.mediaSoupService.getRouter().rtpCapabilities,
+      }));
 
-            socket.send(JSON.stringify({
-              type: "produced",
-              data: { producerId: producer.id }
-            }));
+      this.webSocketHandler.notifyExistingProducers(socket, peerId);
+      this.setupSocketHandlers(socket, peerId);
+      this.setupSocketCleanup(socket, peerId);
+    });
+  }
 
-            for (const [otherPeerId, peer] of peers) {
-              if (otherPeerId === peerId) continue;
-              peer.socket.send(JSON.stringify({
-                type: "newProducer",
-                data: { producerId: producer.id, kind }
-              }));
-            }
-          }
-          break;
+  private setupSocketHandlers(socket: any, peerId: string): void {
+    socket.on("message", async (msgRaw: Buffer) => {
+      try {
+        const msg = JSON.parse(msgRaw.toString());
+        const peer = this.peers.get(peerId);
+        if (!peer) return;
 
-        case "createRecvTransport":
-          {
-            const transport = await mediaRouter.createWebRtcTransport({
-              webRtcServer,
-              enableUdp: true,
-              enableTcp: true,
-              preferUdp: true
-            });
-            state.recvTransport = transport;
-
-            socket.send(JSON.stringify({
-              type: "recvTransportCreated",
-              data: {
-                id             : transport.id,
-                iceParameters  : transport.iceParameters,
-                iceCandidates  : transport.iceCandidates,
-                dtlsParameters : transport.dtlsParameters
-              }
-            }));
-          }
-          break;
-
-        case "connectRecvTransport":
-          {
-            if (!state.recvTransport) {
-              return;
-            }
-            await state.recvTransport.connect({ dtlsParameters: msg.data });
-          }
-          break;
-
-        case "consume":
-          {
-            if (!state.recvTransport) {
-              return;
-            }
-            const { producerId, rtpCapabilities } = msg.data;
-            if (!mediaRouter.canConsume({ producerId, rtpCapabilities })) {
-              socket.send(JSON.stringify({ type: "cannotConsume" }));
-              break;
-            }
-            const consumer = await state.recvTransport.consume({
-              producerId,
-              rtpCapabilities,
-              paused: true
-            });
-            
-            await consumer.resume();
-            state.consumers.push(consumer);
-
-            socket.send(JSON.stringify({
-              type: "consumed",
-              data: {
-                producerId,
-                id: consumer.id,
-                kind: consumer.kind,
-                rtpParameters: consumer.rtpParameters
-              }
-            }));
-          }
-          break;
-        default:
-          break;
+        await this.webSocketHandler.handleMessage(msg, peer, socket, peerId);
+      } catch (error) {
+        console.error("WebSocket message error:", error);
       }
     });
+  }
 
+  private setupSocketCleanup(socket: any, peerId: string): void {
     socket.on("close", () => {
-      peers.delete(peerId);
+      const peer = this.peers.get(peerId);
+      if (peer) {
+        peer.producers.forEach(producer => producer.close());
+        peer.consumers.forEach(consumer => consumer.close());
+        peer.sendTransport?.close();
+        peer.recvTransport?.close();
+      }
+      this.peers.delete(peerId);
+      
+      if (this.peers.size === 0) {
+        this.streamingService.cleanupFFmpegStreams();
+      }
     });
-  });
+  }
 
-  httpServer.listen(8080, () =>
-    console.log("Server running on ws://localhost:8080")
-  );
+  public async start(): Promise<void> {
+    await this.mediaSoupService.initialize();
+    this.initializeServices();
+    this.setupRoutes();
+    
+    const server = this.app.listen(SERVER_CONFIG.port, () => {
+      console.log(`Streaming server running on http://localhost:${SERVER_CONFIG.port}`);
+    });
+
+    this.setupWebSocketServer(server);
+  }
 }
 
-startServer().catch(console.error);
+// Start the server
+const streamingServer = new StreamingServer();
+streamingServer.start().catch(console.error);
