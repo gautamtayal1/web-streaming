@@ -56,6 +56,8 @@ export class WebSocketHandler {
     if (!peer.sendTransport) return;
     
     const { kind, rtpParameters } = data;
+    console.log(`[websocket] 🎥 Creating ${kind} producer for peer ${peerId}`);
+    
     const producer = await peer.sendTransport.produce({ kind, rtpParameters });
     
     if (producer.paused) {
@@ -63,9 +65,16 @@ export class WebSocketHandler {
     }
     
     peer.producers.push(producer);
+    console.log(`[websocket] ✅ Producer created: ${producer.id} (${kind})`);
     
     // Start FFmpeg if this is the first producer (like reference)
-    await this.streamingService.startFFmpegForProducer(producer);
+    try {
+      console.log(`[websocket] 🚀 Calling streamingService.startFFmpegForProducer...`);
+      await this.streamingService.startFFmpegForProducer(producer);
+      console.log(`[websocket] ✅ FFmpeg process initiated for producer ${producer.id}`);
+    } catch (error) {
+      console.error(`[websocket] ❌ Failed to start FFmpeg for producer ${producer.id}:`, error);
+    }
     
     socket.send(JSON.stringify({
       type: "produced",

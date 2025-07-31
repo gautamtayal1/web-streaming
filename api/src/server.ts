@@ -77,6 +77,8 @@ class StreamingServer {
     
     wss.on("connection", (socket) => {
       const peerId = crypto.randomUUID();
+      console.log(`[server] 🔌 New WebSocket connection: ${peerId}`);
+      
       this.peers.set(peerId, { 
         socket: socket as unknown as WebSocket, 
         producers: [], 
@@ -110,8 +112,10 @@ class StreamingServer {
 
   private setupSocketCleanup(socket: any, peerId: string): void {
     socket.on("close", () => {
+      console.log(`[server] WebSocket closed for peer: ${peerId}`);
       const peer = this.peers.get(peerId);
       if (peer) {
+        console.log(`[server] Cleaning up ${peer.producers.length} producers and ${peer.consumers.length} consumers`);
         peer.producers.forEach(producer => producer.close());
         peer.consumers.forEach(consumer => consumer.close());
         peer.sendTransport?.close();
@@ -119,25 +123,50 @@ class StreamingServer {
       }
       this.peers.delete(peerId);
       
+      console.log(`[server] Remaining peers: ${this.peers.size}`);
       if (this.peers.size === 0) {
+        console.log(`[server] No peers left, stopping FFmpeg...`);
         this.streamingService.cleanupFFmpegStreams();
       }
     });
   }
 
   public async start(): Promise<void> {
-    await this.mediaSoupService.initialize();
-    this.initializeServices();
-    this.setupRoutes();
-    
-    const server = this.app.listen(SERVER_CONFIG.port, () => {
-      console.log(`Streaming server running on http://localhost:${SERVER_CONFIG.port}`);
-    });
+    try {
+      console.log('[server] Initializing MediaSoup service...');
+      await this.mediaSoupService.initialize();
+      console.log('[server] MediaSoup service initialized successfully');
+      
+      console.log('[server] Initializing other services...');
+      this.initializeServices();
+      console.log('[server] Services initialized successfully');
+      
+      console.log('[server] Setting up routes...');
+      this.setupRoutes();
+      console.log('[server] Routes set up successfully');
+      
+      console.log('[server] Starting HTTP server...');
+      const server = this.app.listen(SERVER_CONFIG.port, '0.0.0.0', () => {
+        console.log(`[server] HTTP server running on http://localhost:${SERVER_CONFIG.port}`);
+        console.log(`[server] Server bound to 0.0.0.0:${SERVER_CONFIG.port}`);
+      });
+      
+      server.on('error', (error) => {
+        console.error('[server] HTTP server error:', error);
+      });
 
-    this.setupWebSocketServer(server);
+      console.log('[server] Setting up WebSocket server...');
+      this.setupWebSocketServer(server);
+      console.log('[server] WebSocket server set up successfully');
+      
+      console.log('[server] ✅ Server startup completed successfully');
+      
+    } catch (error) {
+      console.error('[server] ❌ Server startup failed:', error);
+      throw error;
+    }
   }
 }
 
-// Start the server
 const streamingServer = new StreamingServer();
 streamingServer.start().catch(console.error);
