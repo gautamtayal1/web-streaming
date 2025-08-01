@@ -70,10 +70,11 @@ export const FFMPEG_CONFIG = {
   },
   hls: {
     time: "1",
-    listSize: "5",
+    listSize: "5", 
     flags: "delete_segments+independent_segments+program_date_time",
     allowCache: "0",
-    segmentType: "mpegts"
+    segmentType: "mpegts",
+    startNumber: "0"
   }
 };
 

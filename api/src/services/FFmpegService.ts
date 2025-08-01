@@ -97,12 +97,13 @@ export class FFmpegService {
     });
 
     // Base FFmpeg args - optimized for live RTP streaming
-    ffmpegArgs.push('-fflags', '+genpts+igndts+flush_packets');
+    ffmpegArgs.push('-fflags', '+genpts+igndts');
     ffmpegArgs.push('-avoid_negative_ts', 'make_zero');
-    ffmpegArgs.push('-max_delay', '0');
-    ffmpegArgs.push('-rtbufsize', '100M');
-    ffmpegArgs.push('-probesize', '32');
-    ffmpegArgs.push('-analyzeduration', '0');
+    ffmpegArgs.push('-use_wallclock_as_timestamps', '1');
+    ffmpegArgs.push('-max_delay', '500000');
+    ffmpegArgs.push('-rtbufsize', '64M');
+    ffmpegArgs.push('-probesize', '1000000');
+    ffmpegArgs.push('-analyzeduration', '500000');
 
     // Add all input streams with protocol whitelist for each
     sdpPaths.forEach(sdpPath => {
@@ -118,18 +119,23 @@ export class FFmpegService {
     ffmpegArgs.push('-map', '[aout]');
     ffmpegArgs.push('-c:v', 'libx264');
     ffmpegArgs.push('-c:a', 'aac');
-    ffmpegArgs.push('-preset', 'veryfast'); // Changed from ultrafast for better quality
+    ffmpegArgs.push('-preset', 'veryfast');
     ffmpegArgs.push('-tune', 'zerolatency');
-    ffmpegArgs.push('-g', '30'); // Set GOP size
+    ffmpegArgs.push('-g', '30');
     ffmpegArgs.push('-keyint_min', '30');
-    ffmpegArgs.push('-r', '30'); // Force 30fps output
-    ffmpegArgs.push('-b:v', '2000k'); // Set video bitrate
-    ffmpegArgs.push('-b:a', '128k'); // Set audio bitrate
+    ffmpegArgs.push('-r', '30');
+    ffmpegArgs.push('-vsync', 'cfr');
+    ffmpegArgs.push('-async', '1');
+    ffmpegArgs.push('-b:v', '2000k');
+    ffmpegArgs.push('-b:a', '128k');
     ffmpegArgs.push('-f', 'hls');
-    ffmpegArgs.push('-hls_time', '4'); // Increased segment time
-    ffmpegArgs.push('-hls_list_size', '10'); // Keep more segments
+    ffmpegArgs.push('-hls_time', '2');
+    ffmpegArgs.push('-hls_list_size', '6');
     ffmpegArgs.push('-hls_flags', 'delete_segments+independent_segments');
     ffmpegArgs.push('-hls_segment_type', 'mpegts');
+    ffmpegArgs.push('-hls_segment_filename', join(this.hlsDir, 'segment_%03d.ts'));
+    ffmpegArgs.push('-start_number', '0');
+    ffmpegArgs.push('-force_key_frames', 'expr:gte(t,n_forced*2)');
     ffmpegArgs.push(join(this.hlsDir, 'stream.m3u8'));
 
     console.log(`[ffmpeg] Composed stream command: ffmpeg ${ffmpegArgs.join(' ')}`);
