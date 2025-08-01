@@ -111,12 +111,18 @@ class StreamingServer {
   }
 
   private setupSocketCleanup(socket: any, peerId: string): void {
-    socket.on("close", () => {
+    socket.on("close", async () => {
       console.log(`[server] WebSocket closed for peer: ${peerId}`);
       const peer = this.peers.get(peerId);
       if (peer) {
         console.log(`[server] Cleaning up ${peer.producers.length} producers and ${peer.consumers.length} consumers`);
-        peer.producers.forEach(producer => producer.close());
+        
+        // Clean up producers from streaming service first
+        for (const producer of peer.producers) {
+          await this.streamingService.cleanupProducer(producer.id);
+          producer.close();
+        }
+        
         peer.consumers.forEach(consumer => consumer.close());
         peer.sendTransport?.close();
         peer.recvTransport?.close();

@@ -5,6 +5,7 @@ import { writeFileSync, existsSync, mkdirSync } from "fs";
 export class FFmpegService {
   private hlsDir: string;
   private ffmpegProcess: ChildProcess | null = null;
+  private activeStreams: Map<string, { videoPort: number, audioPort: number, rtpParams: any }> = new Map();
 
   constructor() {
     this.hlsDir = join(process.cwd(), "hls");
@@ -13,54 +14,194 @@ export class FFmpegService {
     }
   }
 
-  startFFmpeg(videoPort: number, audioPort: number): ChildProcess {
-    // Legacy method - use default parameters
-    return this.startFFmpegWithParams(videoPort, audioPort, {});
+  async addStream(streamId: string, videoPort: number, audioPort: number, rtpParams: any): Promise<void> {
+    this.activeStreams.set(streamId, { videoPort, audioPort, rtpParams });
+    console.log(`[ffmpeg] Added stream ${streamId} - total streams: ${this.activeStreams.size}`);
+    await this.restartFFmpegWithComposition();
   }
 
-  startFFmpegWithParams(videoPort: number, audioPort: number, rtpParams: any): ChildProcess {
-    console.log(`[ffmpeg] Starting FFmpeg to listen on video port: ${videoPort}, audio port: ${audioPort}`);
-    console.log(`[ffmpeg] RTP Parameters:`, rtpParams);
+  async removeStream(streamId: string): Promise<void> {
+    this.activeStreams.delete(streamId);
+    console.log(`[ffmpeg] Removed stream ${streamId} - total streams: ${this.activeStreams.size}`);
+    if (this.activeStreams.size === 0) {
+      this.stopFFmpeg();
+    } else {
+      await this.restartFFmpegWithComposition();
+    }
+  }
+
+  private async restartFFmpegWithComposition(): Promise<void> {
+    if (this.ffmpegProcess) {
+      console.log('[ffmpeg] Stopping existing process before restart...');
+      await this.stopFFmpegGracefully();
+    }
     
-    // Generate SDP content based on actual RTP parameters
-    const videoSdpContent = this.generateVideoSdp(videoPort, rtpParams.video);
-    const audioSdpContent = this.generateAudioSdp(audioPort, rtpParams.audio);
+    if (this.activeStreams.size === 0) {
+      return;
+    }
 
-    // Write SDP files
-    const videoSdpPath = join(this.hlsDir, 'video.sdp');
-    const audioSdpPath = join(this.hlsDir, 'audio.sdp');
-    writeFileSync(videoSdpPath, videoSdpContent);
-    writeFileSync(audioSdpPath, audioSdpContent);
+    console.log(`[ffmpeg] Starting composed stream with ${this.activeStreams.size} inputs`);
+    this.startComposedFFmpeg();
+  }
 
-    console.log(`[ffmpeg] Created SDP files: video=${videoSdpPath}, audio=${audioSdpPath}`);
+  private stopFFmpegGracefully(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.ffmpegProcess) {
+        resolve();
+        return;
+      }
 
-    // FFmpeg args with better error handling for live streams
-    const ffmpegArgs = [
-      '-re', // Read input at its native frame rate (important for live streams)
-      '-protocol_whitelist', 'file,udp,rtp,crypto,data',
-      '-fflags', '+genpts+igndts', // Generate presentation timestamps and ignore input DTS
-      '-max_delay', '500000', // 500ms max delay for real-time streams
-      '-i', videoSdpPath,
-      '-protocol_whitelist', 'file,udp,rtp,crypto,data',
-      '-i', audioSdpPath,
-      '-map', '0:v:0',
-      '-map', '1:a:0',
-      '-c:v', 'libx264',
-      '-c:a', 'aac',
-      '-preset', 'ultrafast', // Fastest encoding for real-time
-      '-tune', 'zerolatency',
-      '-avoid_negative_ts', 'make_zero', // Handle timestamp issues
-      '-use_wallclock_as_timestamps', '1', // Use wall clock for timestamps
-      '-f', 'hls',
-      '-hls_time', '2', // 2 second segments
-      '-hls_list_size', '5', // Keep 5 segments
-      '-hls_flags', 'delete_segments+independent_segments+program_date_time',
-      '-hls_allow_cache', '0',
-      join(this.hlsDir, 'stream.m3u8')
-    ];
+      const process = this.ffmpegProcess;
+      
+      // Set up exit handler
+      const onExit = () => {
+        this.ffmpegProcess = null;
+        resolve();
+      };
 
-    console.log(`[ffmpeg] Command: ffmpeg ${ffmpegArgs.join(' ')}`);
+      process.once('exit', onExit);
+      process.once('error', onExit);
+
+      // Send SIGTERM first, then SIGKILL if needed
+      process.kill('SIGTERM');
+      
+      // Force kill after 3 seconds if still running
+      setTimeout(() => {
+        if (this.ffmpegProcess === process) {
+          console.log('[ffmpeg] Force killing process...');
+          process.kill('SIGKILL');
+        }
+      }, 3000);
+    });
+  }
+
+  private startComposedFFmpeg(): void {
+    const streams = Array.from(this.activeStreams.values());
+    const streamIds = Array.from(this.activeStreams.keys());
+    
+    const sdpPaths: string[] = [];
+    const ffmpegArgs: string[] = [];
+
+    // Generate SDP files for each stream
+    streams.forEach((stream, index) => {
+      const videoSdpContent = this.generateVideoSdp(stream.videoPort, stream.rtpParams.video);
+      const audioSdpContent = this.generateAudioSdp(stream.audioPort, stream.rtpParams.audio);
+      
+      const videoSdpPath = join(this.hlsDir, `video_${index}.sdp`);
+      const audioSdpPath = join(this.hlsDir, `audio_${index}.sdp`);
+      
+      writeFileSync(videoSdpPath, videoSdpContent);
+      writeFileSync(audioSdpPath, audioSdpContent);
+      
+      sdpPaths.push(videoSdpPath, audioSdpPath);
+    });
+
+    // Base FFmpeg args - optimized for live RTP streaming
+    ffmpegArgs.push('-fflags', '+genpts+igndts+flush_packets');
+    ffmpegArgs.push('-avoid_negative_ts', 'make_zero');
+    ffmpegArgs.push('-max_delay', '0');
+    ffmpegArgs.push('-rtbufsize', '100M');
+    ffmpegArgs.push('-probesize', '32');
+    ffmpegArgs.push('-analyzeduration', '0');
+
+    // Add all input streams with protocol whitelist for each
+    sdpPaths.forEach(sdpPath => {
+      ffmpegArgs.push('-protocol_whitelist', 'file,udp,rtp,crypto,data');
+      ffmpegArgs.push('-i', sdpPath);
+    });
+
+    // Create video composition using xstack and audio mix using amix
+    const filterComplex = this.createFilterComplex(streams.length);
+
+    ffmpegArgs.push('-filter_complex', filterComplex);
+    ffmpegArgs.push('-map', '[vout]');
+    ffmpegArgs.push('-map', '[aout]');
+    ffmpegArgs.push('-c:v', 'libx264');
+    ffmpegArgs.push('-c:a', 'aac');
+    ffmpegArgs.push('-preset', 'veryfast'); // Changed from ultrafast for better quality
+    ffmpegArgs.push('-tune', 'zerolatency');
+    ffmpegArgs.push('-g', '30'); // Set GOP size
+    ffmpegArgs.push('-keyint_min', '30');
+    ffmpegArgs.push('-r', '30'); // Force 30fps output
+    ffmpegArgs.push('-b:v', '2000k'); // Set video bitrate
+    ffmpegArgs.push('-b:a', '128k'); // Set audio bitrate
+    ffmpegArgs.push('-f', 'hls');
+    ffmpegArgs.push('-hls_time', '4'); // Increased segment time
+    ffmpegArgs.push('-hls_list_size', '10'); // Keep more segments
+    ffmpegArgs.push('-hls_flags', 'delete_segments+independent_segments');
+    ffmpegArgs.push('-hls_segment_type', 'mpegts');
+    ffmpegArgs.push(join(this.hlsDir, 'stream.m3u8'));
+
+    console.log(`[ffmpeg] Composed stream command: ffmpeg ${ffmpegArgs.join(' ')}`);
     this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+
+    this.setupFFmpegHandlers();
+  }
+
+  private createFilterComplex(streamCount: number): string {
+    if (streamCount === 1) {
+      return '[0:v]scale=1280:720[vout];[1:a]aresample=48000[aout]';
+    }
+
+    // Scale all video inputs to same size
+    const videoScales = [];
+    for (let i = 0; i < streamCount; i++) {
+      const videoIndex = i * 2; // 0, 2, 4, 6... (video SDP files)
+      videoScales.push(`[${videoIndex}:v]scale=640:360[v${i}]`);
+    }
+
+    // Create xstack layout for video
+    const videoInputs = Array.from({length: streamCount}, (_, i) => `[v${i}]`).join('');
+    const layout = this.createXStackLayout(streamCount);
+    const videoFilter = `${videoInputs}xstack=inputs=${streamCount}:layout=${layout}[vout]`;
+
+    // Create amix for audio
+    const audioInputs = [];
+    for (let i = 0; i < streamCount; i++) {
+      const audioIndex = i * 2 + 1; // 1, 3, 5, 7... (audio SDP files)
+      audioInputs.push(`[${audioIndex}:a]`);
+    }
+    const audioFilter = `${audioInputs.join('')}amix=inputs=${streamCount}:duration=longest[aout]`;
+
+    return `${videoScales.join(';')};${videoFilter};${audioFilter}`;
+  }
+
+  private createXStackLayout(streamCount: number): string {
+    if (streamCount === 2) {
+      // Side by side: first at 0,0 second at width of first (640),0
+      return '0_0|w0_0';
+    } else if (streamCount === 3) {
+      // Two on top, one centered below
+      return '0_0|w0_0|w0/2_h0';
+    } else if (streamCount === 4) {
+      // 2x2 grid
+      return '0_0|w0_0|0_h0|w0_h0';
+    } else {
+      // For more streams, create a grid layout
+      const cols = Math.ceil(Math.sqrt(streamCount));
+      const layout = [];
+      
+      for (let i = 0; i < streamCount; i++) {
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+        
+        if (col === 0 && row === 0) {
+          layout.push('0_0');
+        } else if (row === 0) {
+          layout.push(`w${col-1}_0`);
+        } else if (col === 0) {
+          layout.push(`0_h${row-1}`);
+        } else {
+          layout.push(`w${col-1}_h${row-1}`);
+        }
+      }
+      
+      return layout.join('|');
+    }
+  }
+
+  private setupFFmpegHandlers(): void {
+    if (!this.ffmpegProcess) return;
 
     this.ffmpegProcess.on('error', (err) => {
       console.error('[ffmpeg] Error:', err);
@@ -79,8 +220,13 @@ export class FFmpegService {
     this.ffmpegProcess.stdout?.on('data', (data) => {
       console.log('[ffmpeg] stdout:', data.toString());
     });
+  }
 
-    return this.ffmpegProcess;
+  // Legacy method for backward compatibility
+  async startFFmpegWithParams(videoPort: number, audioPort: number, rtpParams: any): Promise<ChildProcess> {
+    const streamId = `legacy_${videoPort}_${audioPort}`;
+    await this.addStream(streamId, videoPort, audioPort, rtpParams);
+    return this.ffmpegProcess!;
   }
 
 
