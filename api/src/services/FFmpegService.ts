@@ -249,30 +249,6 @@ export class FFmpegService {
     return this.ffmpegProcess !== null;
   }
 
-  private generateCombinedSdp(port: number, rtpParams: any): string {
-    const videoParams = rtpParams.video;
-    const audioParams = rtpParams.audio;
-    
-    if (!videoParams || !audioParams) {
-      throw new Error('Both video and audio parameters are required for combined SDP');
-    }
-
-    const videoPayloadType = videoParams.payloadType || 96;
-    const audioPayloadType = audioParams.payloadType || 97;
-    const videoCodec = videoParams.mimeType?.split('/')[1] || 'VP8';
-    const audioCodec = audioParams.mimeType?.split('/')[1] || 'opus';
-    
-    return `v=0
-o=- 0 0 IN IP4 127.0.0.1
-s=FFMPEG_COMBINED
-c=IN IP4 127.0.0.1
-t=0 0
-m=video ${port} RTP/AVP ${videoPayloadType}
-a=rtpmap:${videoPayloadType} ${videoCodec}/${videoParams.clockRate}
-m=audio ${port} RTP/AVP ${audioPayloadType}
-a=rtpmap:${audioPayloadType} ${audioCodec}/${audioParams.clockRate}/${audioParams.channels}`;
-  }
-
   private generateVideoSdp(port: number, videoParams?: any): string {
     if (!videoParams) {
       // Fallback to default H264
