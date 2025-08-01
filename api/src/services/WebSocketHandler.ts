@@ -70,7 +70,7 @@ export class WebSocketHandler {
     // Start FFmpeg if this is the first producer (like reference)
     try {
       console.log(`[websocket] 🚀 Calling streamingService.startFFmpegForProducer...`);
-      await this.streamingService.startFFmpegForProducer(producer);
+      await this.streamingService.startFFmpegForProducer(producer, peerId);
       console.log(`[websocket] ✅ FFmpeg process initiated for producer ${producer.id}`);
     } catch (error) {
       console.error(`[websocket] ❌ Failed to start FFmpeg for producer ${producer.id}:`, error);

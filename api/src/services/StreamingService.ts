@@ -17,13 +17,11 @@ export class StreamingService {
     private ffmpegStreams: Map<string, FFmpegStream>
   ) {}
 
-  async startFFmpegForProducer(producer: mediasoup.types.Producer): Promise<void> {
+  async startFFmpegForProducer(producer: mediasoup.types.Producer, peerId: string): Promise<void> {
     console.log(`[streaming] Starting FFmpeg for producer ${producer.id} (${producer.kind})`);
     
-    // Find the peer that owns this producer to create a stream ID
-    const peerId = this.findPeerByProducer(producer.id);
     if (!peerId) {
-      console.error(`[streaming] Could not find peer for producer ${producer.id}`);
+      console.error(`[streaming] Invalid peerId for producer ${producer.id}`);
       return;
     }
 
@@ -165,14 +163,6 @@ export class StreamingService {
     return rtpParams;
   }
 
-  private findPeerByProducer(producerId: string): string | null {
-    for (const [peerId, peer] of this.peers.entries()) {
-      if (peer.producers.some(p => p.id === producerId)) {
-        return peerId;
-      }
-    }
-    return null;
-  }
 
   async stopFFmpegIfNoProducers(): Promise<void> {
     const producerCount = this.getAllProducers().length;
