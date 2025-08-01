@@ -96,18 +96,21 @@ export class FFmpegService {
       sdpPaths.push(videoSdpPath, audioSdpPath);
     });
 
-    // Base FFmpeg args - optimized for live RTP streaming
-    ffmpegArgs.push('-fflags', '+genpts+igndts');
+    // Base FFmpeg args - aggressive timestamp normalization for multi-stream sync
+    ffmpegArgs.push('-fflags', '+genpts+ignidx+discardcorrupt');
     ffmpegArgs.push('-avoid_negative_ts', 'make_zero');
-    ffmpegArgs.push('-use_wallclock_as_timestamps', '1');
-    ffmpegArgs.push('-max_delay', '500000');
-    ffmpegArgs.push('-rtbufsize', '64M');
-    ffmpegArgs.push('-probesize', '1000000');
-    ffmpegArgs.push('-analyzeduration', '500000');
+    ffmpegArgs.push('-max_delay', '50000');
+    ffmpegArgs.push('-rtbufsize', '8M');
+    ffmpegArgs.push('-probesize', '100000');
+    ffmpegArgs.push('-analyzeduration', '50000');
+    ffmpegArgs.push('-thread_queue_size', '512');
 
-    // Add all input streams with protocol whitelist for each
-    sdpPaths.forEach(sdpPath => {
+    // Add all input streams with aggressive sync
+    sdpPaths.forEach((sdpPath, index) => {
       ffmpegArgs.push('-protocol_whitelist', 'file,udp,rtp,crypto,data');
+      ffmpegArgs.push('-rw_timeout', '2000000');
+      ffmpegArgs.push('-f', 'sdp');
+      ffmpegArgs.push('-re');
       ffmpegArgs.push('-i', sdpPath);
     });
 
@@ -124,8 +127,7 @@ export class FFmpegService {
     ffmpegArgs.push('-g', '30');
     ffmpegArgs.push('-keyint_min', '30');
     ffmpegArgs.push('-r', '30');
-    ffmpegArgs.push('-vsync', 'cfr');
-    ffmpegArgs.push('-async', '1');
+    ffmpegArgs.push('-fps_mode', 'cfr');
     ffmpegArgs.push('-b:v', '2000k');
     ffmpegArgs.push('-b:a', '128k');
     ffmpegArgs.push('-f', 'hls');
@@ -146,14 +148,14 @@ export class FFmpegService {
 
   private createFilterComplex(streamCount: number): string {
     if (streamCount === 1) {
-      return '[0:v]scale=1280:720[vout];[1:a]aresample=48000[aout]';
+      return '[0:v]scale=1280:720,fps=30,setpts=N/30/TB[vout];[1:a]aresample=48000,asetpts=N/SR/TB[aout]';
     }
 
-    // Scale all video inputs to same size
+    // Scale all video inputs with frame-based timestamps
     const videoScales = [];
     for (let i = 0; i < streamCount; i++) {
       const videoIndex = i * 2; // 0, 2, 4, 6... (video SDP files)
-      videoScales.push(`[${videoIndex}:v]scale=640:360[v${i}]`);
+      videoScales.push(`[${videoIndex}:v]scale=640:360,fps=30,setpts=N/30/TB[v${i}]`);
     }
 
     // Create xstack layout for video
@@ -161,15 +163,17 @@ export class FFmpegService {
     const layout = this.createXStackLayout(streamCount);
     const videoFilter = `${videoInputs}xstack=inputs=${streamCount}:layout=${layout}[vout]`;
 
-    // Create amix for audio
+    // Create amix for audio with sample-based timestamps
     const audioInputs = [];
+    const audioSync = [];
     for (let i = 0; i < streamCount; i++) {
       const audioIndex = i * 2 + 1; // 1, 3, 5, 7... (audio SDP files)
-      audioInputs.push(`[${audioIndex}:a]`);
+      audioSync.push(`[${audioIndex}:a]aresample=48000,asetpts=N/SR/TB[a${i}]`);
+      audioInputs.push(`[a${i}]`);
     }
-    const audioFilter = `${audioInputs.join('')}amix=inputs=${streamCount}:duration=longest[aout]`;
+    const audioFilter = `${audioInputs.join('')}amix=inputs=${streamCount}:duration=longest:dropout_transition=2[aout]`;
 
-    return `${videoScales.join(';')};${videoFilter};${audioFilter}`;
+    return `${videoScales.join(';')};${audioSync.join(';')};${videoFilter};${audioFilter}`;
   }
 
   private createXStackLayout(streamCount: number): string {

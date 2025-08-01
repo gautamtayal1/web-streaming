@@ -9,6 +9,7 @@ export class StreamingService {
   private rtpConsumers = new Map<string, mediasoup.types.Consumer>();
   private producerToStreamId = new Map<string, string>();
   private nextPortPair = 5004; // Starting port pair
+  private streamStartTimes = new Map<string, number>(); // Track stream start times
 
   constructor(
     private mediaSoupService: MediaSoupService,
@@ -86,11 +87,22 @@ export class StreamingService {
     const transport = producer.kind === 'video' ? transports.video : transports.audio;
     const router = this.mediaSoupService.getRouter();
     
+    // Ensure all streams for the same ID start at synchronized timestamps
+    let startTime = this.streamStartTimes.get(streamId);
+    if (!startTime) {
+      startTime = Date.now();
+      this.streamStartTimes.set(streamId, startTime);
+      console.log(`[streaming] Setting synchronized start time for stream ${streamId}: ${startTime}`);
+    }
+    
     const rtpConsumer = await transport.consume({
       producerId: producer.id,
       rtpCapabilities: router.rtpCapabilities,
-      paused: false,
+      paused: true, // Start paused to sync timestamps
     });
+    
+    // Resume consumer to begin synchronized streaming
+    await rtpConsumer.resume();
     
     // Log detailed RTP parameters for debugging
     console.log(`[streaming] Consumer created for ${producer.kind} in stream ${streamId}:`);
