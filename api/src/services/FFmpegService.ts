@@ -30,7 +30,7 @@ export class FFmpegService {
     }
   }
 
-  private async restartFFmpegWithComposition(): Promise<void> {
+  async restartFFmpegWithComposition(): Promise<void> {
     if (this.ffmpegProcess) {
       console.log('[ffmpeg] Stopping existing process before restart...');
       await this.stopFFmpegGracefully();
@@ -155,33 +155,28 @@ export class FFmpegService {
       return '[0:v]scale=1280:720:eval=init[vout];[1:a]aresample=48000[aout]';
     }
 
-    // Scale all video inputs with frame-based timestamps
-    const videoScales = [];
-    for (let i = 0; i < streamCount; i++) {
-      const videoIndex = i * 2; // 0, 2, 4, 6... (video SDP files)
-      // videoScales.push(`[${videoIndex}:v]scale=640:360,fps=30,setpts=N/30/TB[v${i}]`);
-      videoScales.push(`[${videoIndex}:v]scale=640:360,setpts=PTS-STARTPTS[v${i}]`)
-      
+    // Simple approach - just like single user but side by side
+    if (streamCount === 2) {
+      return '[0:v]scale=640:360:eval=init[v0];[2:v]scale=640:360:eval=init[v1];[v0][v1]hstack[vout];[1:a][3:a]amix=inputs=2[aout]';
     }
 
-    // Create xstack layout for video
+    // For more than 2 users, use basic grid layout
+    const videoScales = [];
+    const audioInputs = [];
+    
+    for (let i = 0; i < streamCount; i++) {
+      const videoIndex = i * 2;
+      const audioIndex = i * 2 + 1;
+      videoScales.push(`[${videoIndex}:v]scale=320:240:eval=init[v${i}]`);
+      audioInputs.push(`[${audioIndex}:a]`);
+    }
+    
     const videoInputs = Array.from({length: streamCount}, (_, i) => `[v${i}]`).join('');
     const layout = this.createXStackLayout(streamCount);
-    // const videoFilter = `${videoInputs}xstack=inputs=${streamCount}:layout=${layout}[vout]`;
-    const videoFilter = `${videoInputs}xstack=inputs=${streamCount}:layout=${layout}:ts_sync_mode=1[vout]`;
+    const videoFilter = `${videoInputs}xstack=inputs=${streamCount}:layout=${layout}[vout]`;
+    const audioFilter = `${audioInputs.join('')}amix=inputs=${streamCount}[aout]`;
 
-    // Create amix for audio with sample-based timestamps
-    const audioInputs = [];
-    const audioSync = [];
-    for (let i = 0; i < streamCount; i++) {
-      const audioIndex = i * 2 + 1; // 1, 3, 5, 7... (audio SDP files)
-      // audioSync.push(`[${audioIndex}:a]aresample=48000,asetpts=N/SR/TB[a${i}]`);
-      audioSync.push(`[${audioIndex}:a]aresample=48000,asetpts=PTS-STARTPTS[a${i}]`);
-      audioInputs.push(`[a${i}]`);
-    }
-    const audioFilter = `${audioInputs.join('')}amix=inputs=${streamCount}:duration=longest:dropout_transition=2[aout]`;
-
-    return `${videoScales.join(';')};${audioSync.join(';')};${videoFilter};${audioFilter}`;
+    return `${videoScales.join(';')};${videoFilter};${audioFilter}`;
   }
 
   private createXStackLayout(streamCount: number): string {
@@ -261,6 +256,20 @@ export class FFmpegService {
     return this.ffmpegProcess !== null;
   }
 
+  getActiveStreamCount(): number {
+    return this.activeStreams.size;
+  }
+
+  clearAllStreams(): void {
+    this.activeStreams.clear();
+    console.log('[ffmpeg] Cleared all streams from FFmpeg service');
+  }
+
+  addStreamWithoutRestart(streamId: string, videoPort: number, audioPort: number, rtpParams: any): void {
+    this.activeStreams.set(streamId, { videoPort, audioPort, rtpParams });
+    console.log(`[ffmpeg] Added stream ${streamId} without restart - total streams: ${this.activeStreams.size}`);
+  }
+
   private generateVideoSdp(port: number, videoParams?: any): string {
     if (!videoParams) {
       // Fallback to default H264
@@ -316,5 +325,31 @@ c=IN IP4 127.0.0.1
 t=0 0
 m=audio ${port} RTP/AVP ${payloadType}
 a=rtpmap:${payloadType} ${codecName}/${clockRate}/${channels}`;
+  }
+
+  public updateSDPFiles(streamId: string, videoPort: number, audioPort: number, rtpParams: any): void {
+    console.log(`[ffmpeg] Updating SDP files for stream ${streamId} after consumer resume`);
+    
+    // Find the stream index
+    const streamIds = Array.from(this.activeStreams.keys());
+    const streamIndex = streamIds.indexOf(streamId);
+    
+    if (streamIndex === -1) {
+      console.error(`[ffmpeg] Stream ${streamId} not found in active streams`);
+      return;
+    }
+    
+    // Generate fresh SDP content with current timestamp to reset sequence numbers
+    const videoSdpContent = this.generateVideoSdp(videoPort, rtpParams.video);
+    const audioSdpContent = this.generateAudioSdp(audioPort, rtpParams.audio);
+    
+    const videoSdpPath = join(this.hlsDir, `video_${streamIndex}.sdp`);
+    const audioSdpPath = join(this.hlsDir, `audio_${streamIndex}.sdp`);
+    
+    // Write fresh SDP files
+    writeFileSync(videoSdpPath, videoSdpContent);
+    writeFileSync(audioSdpPath, audioSdpContent);
+    
+    console.log(`[ffmpeg] Updated SDP files for stream ${streamId}: video_${streamIndex}.sdp, audio_${streamIndex}.sdp`);
   }
 }

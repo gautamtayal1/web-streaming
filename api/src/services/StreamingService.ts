@@ -136,12 +136,119 @@ export class StreamingService {
         }
       }
       
-      await this.ffmpegService.addStream(streamId, ports.videoPort, ports.audioPort, rtpParams);
+      // Check if this will trigger a restart (more than 1 stream total)
+      const totalStreams = this.ffmpegService.getActiveStreamCount();
+      if (totalStreams >= 1) {
+        // Multiple streams - need to restart FFmpeg with fresh RTP consumers
+        console.log(`[streaming] Detected ${totalStreams + 1} total streams, using restart with fresh RTP consumers`);
+        await this.restartFFmpegWithAllStreams();
+      } else {
+        // First stream - just add normally
+        await this.ffmpegService.addStream(streamId, ports.videoPort, ports.audioPort, rtpParams);
+      }
 
       
     }
   }
 
+  private async restartFFmpegWithAllStreams(): Promise<void> {
+    console.log('[streaming] Restarting FFmpeg with paused consumers approach');
+    
+    // PAUSE all existing RTP consumers instead of closing them
+    console.log(`[streaming] Pausing ${this.rtpConsumers.size} existing RTP consumers`);
+    const pausedConsumers: mediasoup.types.Consumer[] = [];
+    this.rtpConsumers.forEach(consumer => {
+      consumer.pause();
+      pausedConsumers.push(consumer);
+    });
+    
+    // Prepare FFmpeg with all streams
+    const activeStreamIds = new Set(this.producerToStreamId.values());
+    this.ffmpegService.clearAllStreams();
+    
+    // Add all streams to FFmpeg
+    for (const streamId of activeStreamIds) {
+      const ports = this.streamPorts.get(streamId);
+      const rtpParams = this.collectRtpParametersForStream(streamId);
+      if (ports && rtpParams) {
+        this.ffmpegService.addStreamWithoutRestart(streamId, ports.videoPort, ports.audioPort, rtpParams);
+      }
+    }
+    
+    // Restart FFmpeg
+    await this.ffmpegService.restartFFmpegWithComposition();
+    
+    // Small delay then RESUME all consumers at once
+    console.log('[streaming] Waiting for FFmpeg to start, then resuming consumers...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Request keyframes and resume all at once
+    for (const consumer of pausedConsumers) {
+      if (consumer.kind === 'video') {
+        await consumer.requestKeyFrame();
+      }
+    }
+    
+    // Resume all consumers simultaneously
+    pausedConsumers.forEach(consumer => consumer.resume());
+    console.log('[streaming] All consumers resumed simultaneously');
+    
+    // Regenerate SDP files with fresh sequence numbers
+    console.log('[streaming] Regenerating SDP files after resume...');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Update SDP files for all streams
+    const allActiveStreamIds = new Set(this.producerToStreamId.values());
+    for (const streamId of allActiveStreamIds) {
+      const ports = this.streamPorts.get(streamId);
+      const rtpParams = this.collectRtpParametersForStream(streamId);
+      if (ports && rtpParams) {
+        this.ffmpegService.updateSDPFiles(streamId, ports.videoPort, ports.audioPort, rtpParams);
+      }
+    }
+  }
+
+  private async recreateRtpConsumersForStream(streamId: string): Promise<void> {
+    console.log(`[streaming] Recreating RTP consumers for stream ${streamId}`);
+    
+    const transports = this.streamTransports.get(streamId);
+    if (!transports) return;
+    
+    const router = this.mediaSoupService.getRouter();
+    
+    // Find all producers for this stream
+    for (const [producerId, mappedStreamId] of this.producerToStreamId.entries()) {
+      if (mappedStreamId !== streamId) continue;
+      
+      // Find the actual producer
+      const producer = this.findProducerById(producerId);
+      if (!producer) continue;
+      
+      const transport = producer.kind === 'video' ? transports.video : transports.audio;
+      
+      // Create new RTP consumer with fresh sequence numbers
+      const rtpConsumer = await transport.consume({
+        producerId: producer.id,
+        rtpCapabilities: router.rtpCapabilities,
+      });
+      
+      console.log(`[streaming] Recreated ${producer.kind} consumer for stream ${streamId}`);
+      this.rtpConsumers.set(producerId, rtpConsumer);
+      
+      // Request keyframe for video
+      if (producer.kind === 'video') {
+        await rtpConsumer.requestKeyFrame();
+      }
+    }
+  }
+
+  private findProducerById(producerId: string): mediasoup.types.Producer | null {
+    for (const peer of this.peers.values()) {
+      const producer = peer.producers.find(p => p.id === producerId);
+      if (producer) return producer;
+    }
+    return null;
+  }
 
   private getConsumersForStream(streamId: string): mediasoup.types.Consumer[] {
     const consumers: mediasoup.types.Consumer[] = [];
