@@ -9,7 +9,6 @@ export class StreamingService {
   private rtpConsumers = new Map<string, mediasoup.types.Consumer>();
   private producerToStreamId = new Map<string, string>();
   private nextPortPair = 5004; // Starting port pair
-  private streamStartTimes = new Map<string, number>(); // Track stream start times
 
   constructor(
     private mediaSoupService: MediaSoupService,
@@ -46,13 +45,13 @@ export class StreamingService {
 
     const router = this.mediaSoupService.getRouter();
     const videoPort = this.nextPortPair;
-    const audioPort = this.nextPortPair + 2;
-    this.nextPortPair += 4; // Reserve 4 ports per stream (video + rtcp, audio + rtcp)
+    const audioPort = this.nextPortPair + 1;
+    this.nextPortPair += 2; // Reserve 4 ports per stream (video + rtcp, audio + rtcp)
     
     // Create video transport - MediaSoup will send RTP TO FFmpeg
     const videoTransport = await router.createPlainTransport({
       listenInfo: { protocol: "udp", ip: "127.0.0.1" },
-      rtcpMux: false,
+      rtcpMux: true,
       comedia: false,
       enableSrtp: false,
       enableSctp: false
@@ -61,7 +60,7 @@ export class StreamingService {
     // Create audio transport
     const audioTransport = await router.createPlainTransport({
       listenInfo: { protocol: "udp", ip: "127.0.0.1" },
-      rtcpMux: false,
+      rtcpMux: true,
       comedia: false,
       enableSrtp: false,
       enableSctp: false
@@ -72,8 +71,8 @@ export class StreamingService {
     console.log(`[streaming] Audio transport: ${audioTransport.tuple.localIp}:${audioTransport.tuple.localPort} -> FFmpeg port ${audioPort}`);
 
     // Connect transports to send RTP to FFmpeg
-    await videoTransport.connect({ ip: '127.0.0.1', port: videoPort, rtcpPort: videoPort + 1 });
-    await audioTransport.connect({ ip: '127.0.0.1', port: audioPort, rtcpPort: audioPort + 1 });
+    await videoTransport.connect({ ip: '127.0.0.1', port: videoPort });
+    await audioTransport.connect({ ip: '127.0.0.1', port: audioPort });
 
     this.streamTransports.set(streamId, { video: videoTransport, audio: audioTransport });
     this.streamPorts.set(streamId, { videoPort, audioPort });
@@ -88,23 +87,18 @@ export class StreamingService {
     const router = this.mediaSoupService.getRouter();
     
     // Ensure all streams for the same ID start at synchronized timestamps
-    let startTime = this.streamStartTimes.get(streamId);
-    if (!startTime) {
-      startTime = Date.now();
-      this.streamStartTimes.set(streamId, startTime);
-      console.log(`[streaming] Setting synchronized start time for stream ${streamId}: ${startTime}`);
-    }
+    // let startTime = this.streamStartTimes.get(streamId);
+    // if (!startTime) {
+    //   startTime = Date.now();
+    //   this.streamStartTimes.set(streamId, startTime);
+    //   console.log(`[streaming] Setting synchronized start time for stream ${streamId}: ${startTime}`);
+    // }
     
     const rtpConsumer = await transport.consume({
       producerId: producer.id,
       rtpCapabilities: router.rtpCapabilities,
-      paused: true, // Start paused to sync timestamps
     });
     
-    // Resume consumer to begin synchronized streaming
-    await rtpConsumer.resume();
-    
-    // Log detailed RTP parameters for debugging
     console.log(`[streaming] Consumer created for ${producer.kind} in stream ${streamId}:`);
     console.log(`[streaming] Codec: ${rtpConsumer.rtpParameters.codecs[0]?.mimeType}`);
     console.log(`[streaming] Payload Type: ${rtpConsumer.rtpParameters.codecs[0]?.payloadType}`);
@@ -115,12 +109,11 @@ export class StreamingService {
     
     this.rtpConsumers.set(producer.id, rtpConsumer);
     console.log(`[streaming] Producer ${producer.id} (${producer.kind}) piped to RTP transport for stream ${streamId}`);
-    
-    // Check if this stream now has both video and audio
-    await this.checkAndUpdateFFmpegStream(streamId);
+      
+    await this.checkAndUpdateFFmpegStream(streamId, producer);
   }
 
-  private async checkAndUpdateFFmpegStream(streamId: string): Promise<void> {
+  private async checkAndUpdateFFmpegStream(streamId: string, producer: mediasoup.types.Producer): Promise<void> {
     const streamConsumers = this.getConsumersForStream(streamId);
     const hasVideo = streamConsumers.some(c => c.kind === 'video');
     const hasAudio = streamConsumers.some(c => c.kind === 'audio');
@@ -136,6 +129,13 @@ export class StreamingService {
       
       console.log(`[streaming] Adding complete stream ${streamId} to FFmpeg composition`);
       await this.ffmpegService.addStream(streamId, ports.videoPort, ports.audioPort, rtpParams);
+
+      const streamConsumers = this.getConsumersForStream(streamId);
+      for (const consumer of streamConsumers) {
+        if (consumer.kind === "video") {
+          await consumer.requestKeyFrame();
+        }
+      }
     }
   }
 
@@ -196,8 +196,9 @@ export class StreamingService {
       this.streamTransports.clear();
       this.streamPorts.clear();
       this.producerToStreamId.clear();
-      
+      this.nextPortPair = 5004;
       console.log('[streaming] ✅ FFmpeg cleanup completed');
+
     } else {
       console.log(`[streaming] Still have ${producerCount} producers, keeping FFmpeg running`);
     }

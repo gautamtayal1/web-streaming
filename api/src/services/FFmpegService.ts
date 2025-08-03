@@ -63,7 +63,7 @@ export class FFmpegService {
       process.once('error', onExit);
 
       // Send SIGTERM first, then SIGKILL if needed
-      process.kill('SIGTERM');
+      process.kill('SIGINT'); 
       
       // Force kill after 3 seconds if still running
       setTimeout(() => {
@@ -110,7 +110,7 @@ export class FFmpegService {
       ffmpegArgs.push('-protocol_whitelist', 'file,udp,rtp,crypto,data');
       ffmpegArgs.push('-rw_timeout', '2000000');
       ffmpegArgs.push('-f', 'sdp');
-      ffmpegArgs.push('-re');
+      // ffmpegArgs.push('-re');
       ffmpegArgs.push('-i', sdpPath);
     });
 
@@ -124,8 +124,8 @@ export class FFmpegService {
     ffmpegArgs.push('-c:a', 'aac');
     ffmpegArgs.push('-preset', 'veryfast');
     ffmpegArgs.push('-tune', 'zerolatency');
-    ffmpegArgs.push('-g', '30');
-    ffmpegArgs.push('-keyint_min', '30');
+    ffmpegArgs.push('-g', '60');
+    ffmpegArgs.push('-keyint_min', '60');
     ffmpegArgs.push('-r', '30');
     ffmpegArgs.push('-fps_mode', 'cfr');
     ffmpegArgs.push('-b:v', '2000k');
@@ -133,10 +133,14 @@ export class FFmpegService {
     ffmpegArgs.push('-f', 'hls');
     ffmpegArgs.push('-hls_time', '2');
     ffmpegArgs.push('-hls_list_size', '6');
-    ffmpegArgs.push('-hls_flags', 'delete_segments+independent_segments');
+    // ffmpegArgs.push('-hls_flags', 'delete_segments+independent_segments');
+    ffmpegArgs.push(
+      '-hls_flags',
+      'delete_segments+independent_segments+append_list+discont_start'
+      );
     ffmpegArgs.push('-hls_segment_type', 'mpegts');
     ffmpegArgs.push('-hls_segment_filename', join(this.hlsDir, 'segment_%03d.ts'));
-    ffmpegArgs.push('-start_number', '0');
+    // ffmpegArgs.push('-start_number', '0');
     ffmpegArgs.push('-force_key_frames', 'expr:gte(t,n_forced*2)');
     ffmpegArgs.push(join(this.hlsDir, 'stream.m3u8'));
 
@@ -155,20 +159,24 @@ export class FFmpegService {
     const videoScales = [];
     for (let i = 0; i < streamCount; i++) {
       const videoIndex = i * 2; // 0, 2, 4, 6... (video SDP files)
-      videoScales.push(`[${videoIndex}:v]scale=640:360,fps=30,setpts=N/30/TB[v${i}]`);
+      // videoScales.push(`[${videoIndex}:v]scale=640:360,fps=30,setpts=N/30/TB[v${i}]`);
+      videoScales.push(`[${videoIndex}:v]scale=640:360,setpts=PTS-STARTPTS[v${i}]`)
+      
     }
 
     // Create xstack layout for video
     const videoInputs = Array.from({length: streamCount}, (_, i) => `[v${i}]`).join('');
     const layout = this.createXStackLayout(streamCount);
-    const videoFilter = `${videoInputs}xstack=inputs=${streamCount}:layout=${layout}[vout]`;
+    // const videoFilter = `${videoInputs}xstack=inputs=${streamCount}:layout=${layout}[vout]`;
+    const videoFilter = `${videoInputs}xstack=inputs=${streamCount}:layout=${layout}:ts_sync_mode=1[vout]`;
 
     // Create amix for audio with sample-based timestamps
     const audioInputs = [];
     const audioSync = [];
     for (let i = 0; i < streamCount; i++) {
       const audioIndex = i * 2 + 1; // 1, 3, 5, 7... (audio SDP files)
-      audioSync.push(`[${audioIndex}:a]aresample=48000,asetpts=N/SR/TB[a${i}]`);
+      // audioSync.push(`[${audioIndex}:a]aresample=48000,asetpts=N/SR/TB[a${i}]`);
+      audioSync.push(`[${audioIndex}:a]aresample=48000,asetpts=PTS-STARTPTS[a${i}]`);
       audioInputs.push(`[a${i}]`);
     }
     const audioFilter = `${audioInputs.join('')}amix=inputs=${streamCount}:duration=longest:dropout_transition=2[aout]`;
