@@ -152,7 +152,8 @@ export class FFmpegService {
 
   private createFilterComplex(streamCount: number): string {
     if (streamCount === 1) {
-      return '[0:v]scale=1280:720,fps=30,setpts=N/30/TB[vout];[1:a]aresample=48000,asetpts=N/SR/TB[aout]';
+      // return '[0:v]scale=1280:720,fps=30,setpts=N/30/TB[vout];[1:a]aresample=48000,asetpts=N/SR/TB[aout]';
+      return '[0:v]scale=1280:720,setpts=PTS-STARTPTS[vout];[1:a]aresample=48000,asetpts=PTS-STARTPTS[aout]';
     }
 
     // Scale all video inputs with frame-based timestamps

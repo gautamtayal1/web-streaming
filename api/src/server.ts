@@ -172,7 +172,46 @@ class StreamingServer {
       throw error;
     }
   }
+
+  public async cleanup(): Promise<void> {
+    console.log('[server] Starting cleanup...');
+    
+    // Stop FFmpeg
+    this.ffmpegService.stopFFmpeg();
+    
+    // Close all peers
+    for (const [peerId, peer] of this.peers) {
+      peer.producers.forEach(producer => producer.close());
+      peer.consumers.forEach(consumer => consumer.close());
+      peer.sendTransport?.close();
+      peer.recvTransport?.close();
+    }
+    this.peers.clear();
+    
+    // Cleanup streaming service
+    await this.streamingService.stopFFmpegIfNoProducers();
+    
+    console.log('[server] Cleanup completed');
+  }
 }
 
 const streamingServer = new StreamingServer();
+
+// Cleanup on process exit
+process.on('SIGINT', async () => {
+  console.log('[server] SIGINT received, cleaning up...');
+  await streamingServer.cleanup();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('[server] SIGTERM received, cleaning up...');
+  await streamingServer.cleanup();
+  process.exit(0);
+});
+
+process.on('exit', () => {
+  console.log('[server] Process exiting, cleanup complete');
+});
+
 streamingServer.start().catch(console.error);

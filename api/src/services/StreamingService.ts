@@ -45,8 +45,8 @@ export class StreamingService {
 
     const router = this.mediaSoupService.getRouter();
     const videoPort = this.nextPortPair;
-    const audioPort = this.nextPortPair + 1;
-    this.nextPortPair += 2; // Reserve 4 ports per stream (video + rtcp, audio + rtcp)
+    const audioPort = this.nextPortPair + 2;
+    this.nextPortPair += 4; // Reserve 4 ports per stream (video + rtcp, audio + rtcp)
     
     // Create video transport - MediaSoup will send RTP TO FFmpeg
     const videoTransport = await router.createPlainTransport({
@@ -128,7 +128,6 @@ export class StreamingService {
       const rtpParams = this.collectRtpParametersForStream(streamId);
       
       console.log(`[streaming] Adding complete stream ${streamId} to FFmpeg composition`);
-      await this.ffmpegService.addStream(streamId, ports.videoPort, ports.audioPort, rtpParams);
 
       const streamConsumers = this.getConsumersForStream(streamId);
       for (const consumer of streamConsumers) {
@@ -136,6 +135,10 @@ export class StreamingService {
           await consumer.requestKeyFrame();
         }
       }
+      
+      await this.ffmpegService.addStream(streamId, ports.videoPort, ports.audioPort, rtpParams);
+
+      
     }
   }
 
