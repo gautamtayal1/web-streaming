@@ -6,6 +6,7 @@ export class FFmpegService {
   private hlsDir: string;
   private ffmpegProcess: ChildProcess | null = null;
   private activeStreams: Map<string, { videoPort: number, audioPort: number, rtpParams: any }> = new Map();
+  private ffmpegStartTime: number | null = null;
 
   constructor() {
     this.hlsDir = join(process.cwd(), "hls");
@@ -17,67 +18,52 @@ export class FFmpegService {
   async addStream(streamId: string, videoPort: number, audioPort: number, rtpParams: any): Promise<void> {
     this.activeStreams.set(streamId, { videoPort, audioPort, rtpParams });
     console.log(`[ffmpeg] Added stream ${streamId} - total streams: ${this.activeStreams.size}`);
-    await this.restartFFmpegWithComposition();
+    
+    // Start FFmpeg only once when first stream arrives
+    if (!this.ffmpegProcess && this.activeStreams.size === 1) {
+      this.ffmpegStartTime = Date.now();
+      console.log(`[ffmpeg] Starting single long-running FFmpeg process`);
+      this.startSingleFFmpeg();
+    } else if (this.ffmpegProcess) {
+      // Hot-add new stream to existing FFmpeg process
+      console.log(`[ffmpeg] Hot-adding stream ${streamId} to existing FFmpeg process`);
+      this.updateSDPFiles();
+    }
   }
 
   async removeStream(streamId: string): Promise<void> {
     this.activeStreams.delete(streamId);
     console.log(`[ffmpeg] Removed stream ${streamId} - total streams: ${this.activeStreams.size}`);
-    if (this.activeStreams.size === 0) {
-      this.stopFFmpeg();
-    } else {
-      await this.restartFFmpegWithComposition();
-    }
-  }
-
-  private async restartFFmpegWithComposition(): Promise<void> {
-    if (this.ffmpegProcess) {
-      console.log('[ffmpeg] Stopping existing process before restart...');
-      await this.stopFFmpegGracefully();
-    }
     
     if (this.activeStreams.size === 0) {
-      return;
+      this.stopFFmpeg();
+      this.ffmpegStartTime = null;
     }
-
-    console.log(`[ffmpeg] Starting composed stream with ${this.activeStreams.size} inputs`);
-    this.startComposedFFmpeg();
+    // Don't restart FFmpeg when streams are removed - let it continue
   }
 
-  private stopFFmpegGracefully(): Promise<void> {
-    return new Promise((resolve) => {
-      if (!this.ffmpegProcess) {
-        resolve();
-        return;
-      }
-
-      const process = this.ffmpegProcess;
-      
-      // Set up exit handler
-      const onExit = () => {
-        this.ffmpegProcess = null;
-        resolve();
-      };
-
-      process.once('exit', onExit);
-      process.once('error', onExit);
-
-      // Send SIGTERM first, then SIGKILL if needed
-      process.kill('SIGTERM');
-      
-      // Force kill after 3 seconds if still running
-      setTimeout(() => {
-        if (this.ffmpegProcess === process) {
-          console.log('[ffmpeg] Force killing process...');
-          process.kill('SIGKILL');
-        }
-      }, 3000);
-    });
-  }
-
-  private startComposedFFmpeg(): void {
+  private updateSDPFiles(): void {
     const streams = Array.from(this.activeStreams.values());
-    const streamIds = Array.from(this.activeStreams.keys());
+    
+    // Regenerate all SDP files with correct timestamp offsets
+    streams.forEach((stream, index) => {
+      const videoSdpContent = this.generateVideoSdp(stream.videoPort, stream.rtpParams.video);
+      const audioSdpContent = this.generateAudioSdp(stream.audioPort, stream.rtpParams.audio);
+      
+      const videoSdpPath = join(this.hlsDir, `video_${index}.sdp`);
+      const audioSdpPath = join(this.hlsDir, `audio_${index}.sdp`);
+      
+      writeFileSync(videoSdpPath, videoSdpContent);
+      writeFileSync(audioSdpPath, audioSdpContent);
+    });
+    
+    console.log(`[ffmpeg] Updated SDP files for ${streams.length} streams`);
+  }
+
+  // Removed stopFFmpegGracefully - no longer needed since we don't restart
+
+  private startSingleFFmpeg(): void {
+    const streams = Array.from(this.activeStreams.values());
     
     const sdpPaths: string[] = [];
     const ffmpegArgs: string[] = [];
@@ -96,21 +82,21 @@ export class FFmpegService {
       sdpPaths.push(videoSdpPath, audioSdpPath);
     });
 
-    // Base FFmpeg args - aggressive timestamp normalization for multi-stream sync
+    // Base FFmpeg args - optimized for live streams with timestamp issues
     ffmpegArgs.push('-fflags', '+genpts+ignidx+discardcorrupt');
     ffmpegArgs.push('-avoid_negative_ts', 'make_zero');
-    ffmpegArgs.push('-max_delay', '50000');
-    ffmpegArgs.push('-rtbufsize', '8M');
-    ffmpegArgs.push('-probesize', '100000');
-    ffmpegArgs.push('-analyzeduration', '50000');
-    ffmpegArgs.push('-thread_queue_size', '512');
+    ffmpegArgs.push('-max_delay', '0'); // Accept late packets
+    ffmpegArgs.push('-reorder_queue_size', '10000'); // Large reorder buffer
+    ffmpegArgs.push('-rtbufsize', '32M'); // Increased buffer
+    ffmpegArgs.push('-probesize', '1000000');
+    ffmpegArgs.push('-analyzeduration', '1000000');
+    ffmpegArgs.push('-thread_queue_size', '1024');
 
-    // Add all input streams with aggressive sync
+    // Add all input streams - no -re flag for live streams
     sdpPaths.forEach((sdpPath, index) => {
       ffmpegArgs.push('-protocol_whitelist', 'file,udp,rtp,crypto,data');
-      ffmpegArgs.push('-rw_timeout', '2000000');
+      ffmpegArgs.push('-rw_timeout', '5000000');
       ffmpegArgs.push('-f', 'sdp');
-      ffmpegArgs.push('-re');
       ffmpegArgs.push('-i', sdpPath);
     });
 
@@ -133,7 +119,7 @@ export class FFmpegService {
     ffmpegArgs.push('-f', 'hls');
     ffmpegArgs.push('-hls_time', '2');
     ffmpegArgs.push('-hls_list_size', '6');
-    ffmpegArgs.push('-hls_flags', 'delete_segments+independent_segments');
+    ffmpegArgs.push('-hls_flags', 'delete_segments+independent_segments+append_list');
     ffmpegArgs.push('-hls_segment_type', 'mpegts');
     ffmpegArgs.push('-hls_segment_filename', join(this.hlsDir, 'segment_%03d.ts'));
     ffmpegArgs.push('-start_number', '0');
@@ -254,13 +240,15 @@ export class FFmpegService {
   }
 
   private generateVideoSdp(port: number, videoParams?: any): string {
+    // Calculate timestamp offset to synchronize with FFmpeg start time
+    const offsetSec = this.ffmpegStartTime ? (Date.now() - this.ffmpegStartTime) / 1000 : 0;
     if (!videoParams) {
       // Fallback to default H264
       return `v=0
 o=- 0 0 IN IP4 127.0.0.1
 s=FFMPEG_VIDEO
 c=IN IP4 127.0.0.1
-t=0 0
+t=${offsetSec} 0
 m=video ${port} RTP/AVP 96
 a=rtpmap:96 H264/90000`;
     }
@@ -276,19 +264,21 @@ a=rtpmap:96 H264/90000`;
 o=- 0 0 IN IP4 127.0.0.1
 s=FFMPEG_VIDEO
 c=IN IP4 127.0.0.1
-t=0 0
+t=${offsetSec} 0
 m=video ${port} RTP/AVP ${payloadType}
 a=rtpmap:${payloadType} ${codecName}/${clockRate}`;
   }
 
   private generateAudioSdp(port: number, audioParams?: any): string {
+    // Calculate timestamp offset to synchronize with FFmpeg start time
+    const offsetSec = this.ffmpegStartTime ? (Date.now() - this.ffmpegStartTime) / 1000 : 0;
     if (!audioParams) {
       // Fallback to default Opus
       return `v=0
 o=- 0 0 IN IP4 127.0.0.1
 s=FFMPEG_AUDIO
 c=IN IP4 127.0.0.1
-t=0 0
+t=${offsetSec} 0
 m=audio ${port} RTP/AVP 97
 a=rtpmap:97 opus/48000/2`;
     }
@@ -305,7 +295,7 @@ a=rtpmap:97 opus/48000/2`;
 o=- 0 0 IN IP4 127.0.0.1
 s=FFMPEG_AUDIO
 c=IN IP4 127.0.0.1
-t=0 0
+t=${offsetSec} 0
 m=audio ${port} RTP/AVP ${payloadType}
 a=rtpmap:${payloadType} ${codecName}/${clockRate}/${channels}`;
   }
