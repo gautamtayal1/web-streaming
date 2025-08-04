@@ -57,15 +57,54 @@ export class WebSocketHandler {
     
     const { kind, rtpParameters } = data;
     console.log(`[websocket] 🎥 Creating ${kind} producer for peer ${peerId}`);
+    console.log(`[websocket] RTP parameters:`, {
+      codecs: rtpParameters.codecs?.map((c: any) => ({ mimeType: c.mimeType, payloadType: c.payloadType })),
+      encodings: rtpParameters.encodings?.length || 0
+    });
     
     const producer = await peer.sendTransport.produce({ kind, rtpParameters });
     
+    console.log(`[websocket] Producer created with state: paused=${producer.paused}, closed=${producer.closed}`);
+    
     if (producer.paused) {
       await producer.resume();
+      console.log(`[websocket] Producer ${producer.id} resumed successfully`);
+    } else {
+      console.log(`[websocket] Producer ${producer.id} was not paused, should be producing immediately`);
     }
+
+    // Force resume to ensure producer is active
+    await producer.resume();
+    console.log(`[websocket] Force resumed producer ${producer.id}, final state: paused=${producer.paused}`);
+
+    // Log RTP parameters to check codec configuration
+    console.log(`[websocket] Producer RTP parameters:`, {
+      codecs: producer.rtpParameters.codecs.map(c => ({ 
+        mimeType: c.mimeType, 
+        payloadType: c.payloadType,
+        clockRate: c.clockRate 
+      })),
+      encodings: producer.rtpParameters.encodings
+    });
     
     peer.producers.push(producer);
     console.log(`[websocket] ✅ Producer created: ${producer.id} (${kind})`);
+    
+    // Add event listeners to monitor producer
+    producer.on('score', (score) => {
+      console.log(`[websocket] Producer ${producer.id} score update:`, score);
+    });
+
+    producer.on('pause', () => {
+      console.log(`[websocket] ⏸️  Producer ${producer.id} paused`);
+    });
+
+    producer.on('resume', () => {
+      console.log(`[websocket] ▶️  Producer ${producer.id} resumed`);
+    });
+
+    // Start monitoring producer stats
+    this.startProducerStatsMonitoring(producer);
     
     // Start FFmpeg if this is the first producer (like reference)
     try {
@@ -156,5 +195,50 @@ export class WebSocketHandler {
         }));
       }
     }
+  }
+
+  private startProducerStatsMonitoring(producer: any): void {
+    // Monitor WebRTC producer stats every 2 seconds
+    const statsInterval = setInterval(async () => {
+      try {
+        if (producer.closed) {
+          clearInterval(statsInterval);
+          return;
+        }
+
+        const stats = await producer.getStats();
+        
+        // Find the RTP stream stats from the WebRTC producer
+        const rtpStream = Array.from(stats.values()).find(
+          (stat: any) => stat.type === 'outbound-rtp'
+        );
+
+        if (rtpStream) {
+          console.log(`[PRODUCER-STATS] ${producer.kind} Producer ${producer.id.slice(0, 8)}:`, {
+            bytesSent: rtpStream.bytesSent || 0,
+            packetsSent: rtpStream.packetsSent || 0,
+            framesEncoded: rtpStream.framesEncoded || 0,
+            timestamp: rtpStream.timestamp || 0,
+            score: producer.score
+          });
+
+          // Check if producer is actually sending data
+          if (rtpStream.packetsSent === 0) {
+            console.warn(`⚠️  WebRTC ${producer.kind} producer ${producer.id.slice(0, 8)} is not sending packets`);
+          }
+        } else {
+          console.warn(`⚠️  No RTP stream stats found for ${producer.kind} producer ${producer.id.slice(0, 8)}`);
+        }
+
+      } catch (error) {
+        console.error(`Failed to get ${producer.kind} producer stats:`, error);
+      }
+    }, 2000);
+
+    // Stop monitoring after 30 seconds
+    setTimeout(() => {
+      clearInterval(statsInterval);
+      console.log(`Stopped stats monitoring for ${producer.kind} producer ${producer.id.slice(0, 8)}`);
+    }, 30000);
   }
 }

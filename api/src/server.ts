@@ -147,6 +147,10 @@ class StreamingServer {
       this.initializeServices();
       console.log('[server] Services initialized successfully');
       
+      console.log('[server] Starting FFmpeg with static SDP...');
+      await this.ffmpegService.startWithStaticSDP();
+      console.log('[server] FFmpeg started with pre-allocated ports');
+      
       console.log('[server] Setting up routes...');
       this.setupRoutes();
       console.log('[server] Routes set up successfully');
@@ -190,6 +194,9 @@ class StreamingServer {
     
     // Cleanup streaming service
     await this.streamingService.stopFFmpegIfNoProducers();
+    
+    // Cleanup MediaSoup (includes pre-allocated transports)
+    await this.mediaSoupService.cleanup();
     
     console.log('[server] Cleanup completed');
   }
