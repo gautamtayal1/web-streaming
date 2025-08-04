@@ -19,31 +19,24 @@ export default function StreamPage() {
   const onMessage = useCallback((msg: WSMessage) => {
     switch (msg.type) {
       case "routerRtpCapabilities":
-        {
-          (async () => {
-            try {
-              const dev = new mediasoupClient.Device();
-              await dev.load({ routerRtpCapabilities: msg.data });
-              setDevice(dev);
-              setRtpCaps(msg.data);
-
-              send({ type: "createSendTransport" });
-              send({ type: "createRecvTransport" });
-            } catch (error) {
-              console.error("Failed to load device:", error);
-            }
-          })();
-        }
+        (async () => {
+          try {
+            const dev = new mediasoupClient.Device();
+            await dev.load({ routerRtpCapabilities: msg.data });
+            setDevice(dev);
+            setRtpCaps(msg.data);
+            send({ type: "createSendTransport" });
+            send({ type: "createRecvTransport" });
+          } catch (error) {
+            console.error("Failed to load device:", error);
+          }
+        })();
         break;
 
       case "sendTransportCreated":
         {
-          const { id, iceParameters, iceCandidates, dtlsParameters } = msg.data;
-          if (!device) {
-            return;
-          }
-          const transport = device.createSendTransport({ id, iceParameters, iceCandidates, dtlsParameters });
-
+          if (!device) return;
+          const transport = device.createSendTransport(msg.data);
           transport.on("connect", async ({ dtlsParameters }, callback, errback) => {
             try {
               send({ type: "connectSendTransport", data: dtlsParameters });
@@ -66,12 +59,8 @@ export default function StreamPage() {
 
       case "recvTransportCreated":
         {
-          const { id, iceParameters, iceCandidates, dtlsParameters } = msg.data;
-          if (!device) {
-            return;
-          }
-          const transport = device.createRecvTransport({ id, iceParameters, iceCandidates, dtlsParameters });
-
+          if (!device) return;
+          const transport = device.createRecvTransport(msg.data);
           transport.on("connect", async ({ dtlsParameters }, callback, errback) => {
             try {
               send({ type: "connectRecvTransport", data: dtlsParameters });
@@ -85,44 +74,32 @@ export default function StreamPage() {
         break;
 
       case "newProducer":
-        {
-          if (recvTransport && rtpCaps) {
-            send({ type: "consume", data: { 
-              producerId: msg.data.producerId, 
-              rtpCapabilities: rtpCaps 
-            }});
-          } else {
-            setPendingProducers(prev => [...prev, msg.data.producerId]);
-          }
+        if (recvTransport && rtpCaps) {
+          send({ type: "consume", data: { 
+            producerId: msg.data.producerId, 
+            rtpCapabilities: rtpCaps 
+          }});
+        } else {
+          setPendingProducers(prev => [...prev, msg.data.producerId]);
         }
         break;
 
       case "consumed":
-        {
-          (async () => {
-            try {
-              const { id, producerId, kind, rtpParameters } = msg.data;
-              if (!recvTransport) {
-                return;
-              }
-              const consumer = await recvTransport.consume({ id, producerId, kind, rtpParameters});
-              consumer.resume();
-              setConsumers(prev => [...prev, consumer]);
-            } catch (error) {
-              console.error("Failed to consume:", error);
-            }
-          })();
-        }
+        (async () => {
+          try {
+            if (!recvTransport) return;
+            const consumer = await recvTransport.consume(msg.data);
+            consumer.resume();
+            setConsumers(prev => [...prev, consumer]);
+          } catch (error) {
+            console.error("Failed to consume:", error);
+          }
+        })();
         break;
 
       case "produced":
-        {
-          const { producerId } = msg.data;
-          if (pendingProduceCallbacksRef.current.length > 0) {
-            const callback = pendingProduceCallbacksRef.current.shift()!;
-            callback({ id: producerId });
-          }
-        }
+        const callback = pendingProduceCallbacksRef.current.shift();
+        if (callback) callback({ id: msg.data.producerId });
         break;
 
       default:
@@ -164,64 +141,48 @@ export default function StreamPage() {
   useEffect(() => {
     if (!sendTransport || !localStream) return;
     
-    (async () => {
+    localStream.getTracks().forEach(async (track) => {
       try {
-        const tracks = localStream.getTracks();
-        for (const track of tracks) {
-          if (!sendTransport) {
-            return;
-          }
-          
-          try {
-            const producer = await sendTransport.produce({ track });
-          } catch (trackError) {
-            console.error(`Failed to produce ${track.kind} track:`, trackError);
-          }
-        }
+        await sendTransport.produce({ track });
       } catch (error) {
-        console.error("Failed to produce:", error);
+        console.error(`Failed to produce ${track.kind} track:`, error);
       }
-    })();
+    });
   }, [sendTransport, localStream]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then(stream => {
         setLocalStream(stream);
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
-      } catch (error) {
-        console.error("Failed to get user media:", error);
-      }
-    })();
+      })
+      .catch(error => console.error("Failed to get user media:", error));
   }, []);
 
 
   return (
-    <div className="p-4 space-y-4">
-      <div className="flex gap-4 justify-center items-center">
-        <div>
-          <h2>Your Video</h2>
+    <div className="min-h-screen flex flex-col justify-center items-center bg-black p-4">
+      <div className="w-[90vw] h-[90vh] flex gap-4 justify-center items-center">
+        <div className="flex-1 h-full flex flex-col">
+          <h2 className="text-white text-center mb-2 text-lg font-semibold">Your Video</h2>
           <video 
             ref={localVideoRef} 
             autoPlay 
             muted 
             playsInline 
-            className="w-150 h-150 border-4 border-blue-500 bg-gray-200 object-cover"
+            className="w-full h-full border-2 border-blue-500 bg-gray-800 object-cover rounded-lg"
           />
         </div>
-        <div>
-          <h2>Peer Video</h2>
-          <div className="relative">
-            <video 
-              ref={remoteVideoRef} 
-              autoPlay 
-              playsInline 
-              className="w-150 h-150 border-4 border-red-500 object-cover" 
-            />
-          </div>
+        <div className="flex-1 h-full flex flex-col">
+          <h2 className="text-white text-center mb-2 text-lg font-semibold">Peer Video</h2>
+          <video 
+            ref={remoteVideoRef} 
+            autoPlay 
+            playsInline 
+            className="w-full h-full border-2 border-red-500 bg-gray-800 object-cover rounded-lg" 
+          />
         </div>
       </div>
     </div>
