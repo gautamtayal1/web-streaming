@@ -147,9 +147,7 @@ class StreamingServer {
       this.initializeServices();
       console.log('[server] Services initialized successfully');
       
-      console.log('[server] Starting FFmpeg with static SDP...');
-      await this.ffmpegService.startWithStaticSDP();
-      console.log('[server] FFmpeg started with pre-allocated ports');
+      console.log('[server] FFmpeg will start when first user connects (lazy initialization)');
       
       console.log('[server] Setting up routes...');
       this.setupRoutes();

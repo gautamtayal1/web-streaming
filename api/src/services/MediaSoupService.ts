@@ -97,9 +97,29 @@ export class MediaSoupService {
         console.log(`RTP consumer resumed for ${producer.kind}`);
       }
       
+      // Force resume to ensure consumer is active
+      await consumer.resume();
+      console.log(`RTP consumer force resumed for ${producer.kind}`);
+      
       if (producer.kind === 'video') {
+        // Request multiple keyframes to ensure video starts flowing
         await consumer.requestKeyFrame();
-        console.log(`Keyframe requested for video producer`);
+        console.log(`Initial keyframe requested for video consumer`);
+        
+        // Additional keyframe requests with delays
+        setTimeout(async () => {
+          if (!consumer.closed && !producer.closed) {
+            await consumer.requestKeyFrame();
+            console.log(`Secondary keyframe requested for video consumer`);
+          }
+        }, 1000);
+        
+        setTimeout(async () => {
+          if (!consumer.closed && !producer.closed) {
+            await consumer.requestKeyFrame();
+            console.log(`Tertiary keyframe requested for video consumer`);
+          }
+        }, 3000);
       }
 
       return consumer;

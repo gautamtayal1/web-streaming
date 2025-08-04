@@ -86,47 +86,67 @@ export class FFmpegService {
 
     const ffmpegArgs: string[] = [];
 
-    // Base FFmpeg args
+    // Optimized FFmpeg args for low-latency RTP streaming
     ffmpegArgs.push('-protocol_whitelist', 'file,udp,rtp');
-    ffmpegArgs.push('-fflags', '+genpts+discardcorrupt+igndts');
-    ffmpegArgs.push('-analyzeduration', '3000000');
-    ffmpegArgs.push('-probesize', '3000000');
-    ffmpegArgs.push('-max_delay', '500000');
-    ffmpegArgs.push('-buffer_size', '65536');
+    ffmpegArgs.push('-fflags', '+genpts+discardcorrupt+igndts+flush_packets');
+    ffmpegArgs.push('-analyzeduration', '500000');   // Further reduced for faster startup
+    ffmpegArgs.push('-probesize', '500000');         // Further reduced for faster startup
+    ffmpegArgs.push('-max_delay', '50000');          // Reduced for lower latency
+    ffmpegArgs.push('-buffer_size', '16384');        // Smaller buffer for lower latency
+    ffmpegArgs.push('-thread_queue_size', '512');    // Reduced to prevent memory issues
+    ffmpegArgs.push('-avoid_negative_ts', 'make_zero');
+    ffmpegArgs.push('-reorder_queue_size', '0');     // Disable reordering for low latency
+    ffmpegArgs.push('-rtbufsize', '16M');            // Smaller RTP buffer for lower latency
+    ffmpegArgs.push('-use_wallclock_as_timestamps', '1'); // Use wall clock timestamps
 
-    // Input
+    // Input with framerate constraints
     ffmpegArgs.push('-i', staticSdpPath);
+    ffmpegArgs.push('-r', '15');  // Reduce framerate for better performance
 
-    // Filter complex: scale both videos and combine side by side, merge audio
+    // Simplified filter complex with lower resolution for better performance
     ffmpegArgs.push('-filter_complex',
-      '[0:0]setpts=PTS-STARTPTS,scale=320:240[v0]; [0:2]setpts=PTS-STARTPTS,scale=320:240[v1]; [v0][v1]hstack=inputs=2[v]; [0:1][0:3]amerge=inputs=2[a]'
+      // Use smaller resolution and force aspect ratio to prevent reconfigurations
+      '[0:0]scale=160:120:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=160:120:(ow-iw)/2:(oh-ih)/2,fps=15[v0]; ' +
+      '[0:2]scale=160:120:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=160:120:(ow-iw)/2:(oh-ih)/2,fps=15[v1]; ' +
+      '[v0][v1]hstack=inputs=2[v]; ' +
+      '[0:1][0:3]amerge=inputs=2,aresample=44100[a]'
     );
 
     // Mapping
     ffmpegArgs.push('-map', '[v]');
     ffmpegArgs.push('-map', '[a]');
 
-    // Video codec settings
+    // Maximum performance video codec settings
     ffmpegArgs.push('-c:v', 'libx264');
-    ffmpegArgs.push('-preset', 'veryfast');
+    ffmpegArgs.push('-preset', 'superfast');  // Changed from ultrafast for better quality/performance balance
     ffmpegArgs.push('-tune', 'zerolatency');
     ffmpegArgs.push('-pix_fmt', 'yuv420p');
-    ffmpegArgs.push('-g', '30');
+    ffmpegArgs.push('-g', '15');              // Match framerate
     ffmpegArgs.push('-sc_threshold', '0');
+    ffmpegArgs.push('-bf', '0');              // No B-frames
+    ffmpegArgs.push('-refs', '1');            // Single reference frame
+    ffmpegArgs.push('-crf', '35');            // Higher CRF for maximum performance
+    ffmpegArgs.push('-maxrate', '300k');      // Lower bitrate for better performance
+    ffmpegArgs.push('-bufsize', '600k');      // Smaller buffer size
+    ffmpegArgs.push('-threads', '4');         // Increase threads for better performance
+    ffmpegArgs.push('-x264opts', 'keyint=15:min-keyint=15:no-scenecut');
 
     // Audio codec settings
     ffmpegArgs.push('-c:a', 'aac');
     ffmpegArgs.push('-ar', '44100');
     ffmpegArgs.push('-ac', '2');
-    ffmpegArgs.push('-b:a', '128k');
+    ffmpegArgs.push('-b:a', '64k');          // Reduce audio bitrate
+    ffmpegArgs.push('-profile:a', 'aac_low');
 
-    // HLS settings
+    // Fixed HLS settings for proper segment deletion
     ffmpegArgs.push('-f', 'hls');
-    ffmpegArgs.push('-hls_time', '2');
+    ffmpegArgs.push('-hls_time', '2');               // Back to 2 seconds for stability
     ffmpegArgs.push('-hls_list_size', '5');
-    ffmpegArgs.push('-hls_flags', 'delete_segments');
+    ffmpegArgs.push('-hls_flags', 'delete_segments+independent_segments');
     ffmpegArgs.push('-hls_allow_cache', '0');
     ffmpegArgs.push('-hls_segment_type', 'mpegts');
+    // Removed hls_playlist_type event - this prevents deletion
+    ffmpegArgs.push('-hls_segment_filename', join(this.hlsDir, 'stream%d.ts'));
     ffmpegArgs.push(join(this.hlsDir, 'stream.m3u8'));
 
     console.log(`[ffmpeg] Static SDP command: ffmpeg ${ffmpegArgs.join(' ')}`);

@@ -22,6 +22,12 @@ export class StreamingService {
 
     this.producerAssignments.set(producer.id, transportIndex);
     await this.mediaSoupService.createRtpConsumer(producer, transportIndex);
+    
+    // Start FFmpeg if not already running (lazy start)
+    if (!this.ffmpegService.isRunning()) {
+      console.log(`[streaming] Starting FFmpeg for first producer`);
+      await this.ffmpegService.startWithStaticSDP();
+    }
   }
 
   private hasProducerOfKind(kind: string): boolean {
