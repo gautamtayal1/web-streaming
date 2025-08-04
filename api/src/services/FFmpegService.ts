@@ -124,7 +124,7 @@ export class FFmpegService {
     ffmpegArgs.push('-f', 'hls');
     ffmpegArgs.push('-hls_time', '2');
     ffmpegArgs.push('-hls_list_size', '5');
-    ffmpegArgs.push('-hls_flags', 'append_list');
+    ffmpegArgs.push('-hls_flags', 'delete_segments');
     ffmpegArgs.push('-hls_allow_cache', '0');
     ffmpegArgs.push('-hls_segment_type', 'mpegts');
     ffmpegArgs.push(join(this.hlsDir, 'stream.m3u8'));
