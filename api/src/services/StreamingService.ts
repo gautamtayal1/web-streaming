@@ -4,7 +4,7 @@ import { FFmpegService } from "./FFmpegService";
 import * as mediasoup from "mediasoup";
 
 export class StreamingService {
-  private producerAssignments = new Map<string, number>(); // producerId -> transportIndex
+  private producerAssignments = new Map<string, number>();
 
   constructor(
     private mediaSoupService: MediaSoupService,
@@ -23,7 +23,6 @@ export class StreamingService {
     this.producerAssignments.set(producer.id, transportIndex);
     await this.mediaSoupService.createRtpConsumer(producer, transportIndex);
     
-    // Start FFmpeg if not already running (lazy start)
     if (!this.ffmpegService.isRunning()) {
       console.log(`[streaming] Starting FFmpeg for first producer`);
       await this.ffmpegService.startWithStaticSDP();
@@ -64,7 +63,6 @@ export class StreamingService {
     return allProducers;
   }
 
-  // Legacy methods
   async createFFmpegStream(_streamId: string): Promise<FFmpegStream> {
     throw new Error("Use startFFmpegForProducer instead");
   }

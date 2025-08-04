@@ -25,7 +25,7 @@ export class MediaSoupService {
     await this.createWorker();
     await this.createWebRtcServer();
     await this.createRouter();
-    await this.initializeRtpTransports(); // <- THIS is where ports are bound
+    await this.initializeRtpTransports();
   }
 
   getRouter(): mediasoup.types.Router {
@@ -74,7 +74,6 @@ export class MediaSoupService {
         return null;
       }
 
-      // Log producer state before creating consumer
       console.log(`Producer stats before creating consumer:`, {
         id: producer.id,
         kind: producer.kind,
@@ -91,22 +90,18 @@ export class MediaSoupService {
       this.logConsumerCreation(producer, consumer, transportIndex);
       this.setupConsumerEventHandlers(consumer, producer.id);
 
-      // Resume the consumer and request keyframe if video
       if (consumer.paused) {
         await consumer.resume();
         console.log(`RTP consumer resumed for ${producer.kind}`);
       }
       
-      // Force resume to ensure consumer is active
       await consumer.resume();
       console.log(`RTP consumer force resumed for ${producer.kind}`);
       
       if (producer.kind === 'video') {
-        // Request multiple keyframes to ensure video starts flowing
         await consumer.requestKeyFrame();
         console.log(`Initial keyframe requested for video consumer`);
         
-        // Additional keyframe requests with delays
         setTimeout(async () => {
           if (!consumer.closed && !producer.closed) {
             await consumer.requestKeyFrame();
@@ -135,21 +130,17 @@ export class MediaSoupService {
   async cleanup(): Promise<void> {
     console.info("Cleaning up MediaSoup resources...");
     
-    // Close all RTP transports
     [...this.rtpTransports.videoTransports, ...this.rtpTransports.audioTransports]
       .forEach(transport => transport.close());
     
-    // Close router
     if (this.router) {
       this.router.close();
     }
 
-    // Close webRTC server
     if (this.webRtcServer) {
       this.webRtcServer.close();
     }
 
-    // Close worker
     if (this.worker) {
       this.worker.close();
     }
@@ -188,14 +179,12 @@ export class MediaSoupService {
   }
 
   private async createVideoTransports(): Promise<void> {
-    // Video transport 1 (port 5004)
     const videoTransport1 = await this.createAndConnectPlainTransport(
       this.FIXED_PORTS.video[0]
     );
     this.rtpTransports.videoTransports.push(videoTransport1);
     console.log(`Video RTP transport 1 connected on port ${this.FIXED_PORTS.video[0]}`);
 
-    // Video transport 2 (port 5008)
     const videoTransport2 = await this.createAndConnectPlainTransport(
       this.FIXED_PORTS.video[1]
     );
@@ -204,14 +193,12 @@ export class MediaSoupService {
   }
 
   private async createAudioTransports(): Promise<void> {
-    // Audio transport 1 (port 5006)
     const audioTransport1 = await this.createAndConnectPlainTransport(
       this.FIXED_PORTS.audio[0]
     );
     this.rtpTransports.audioTransports.push(audioTransport1);
     console.log(`Audio RTP transport 1 connected on port ${this.FIXED_PORTS.audio[0]}`);
 
-    // Audio transport 2 (port 5010)
     const audioTransport2 = await this.createAndConnectPlainTransport(
       this.FIXED_PORTS.audio[1]
     );
@@ -219,7 +206,6 @@ export class MediaSoupService {
     console.log(`Audio RTP transport 2 connected on port ${this.FIXED_PORTS.audio[1]}`);
   }
 
-  // Create PlainTransport that sends RTP to FFmpeg  
   private async createAndConnectPlainTransport(port: number): Promise<mediasoup.types.PlainTransport> {
     const transport = await this.router.createPlainTransport({
       listenIp: this.FIXED_PORTS.listenIp,
@@ -227,7 +213,6 @@ export class MediaSoupService {
       comedia: false,
     });
 
-    // Connect transport to send RTP TO FFmpeg on the specified port
     await transport.connect({
       ip: this.FIXED_PORTS.listenIp,
       port: port,

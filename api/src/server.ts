@@ -32,7 +32,6 @@ class StreamingServer {
     this.app.use(cors());
     this.app.use(express.json());
     
-    // Serve HLS files with proper headers for streaming
     this.app.use('/hls', express.static(this.hlsDir, {
       setHeaders: (res, path) => {
         if (path.endsWith('.m3u8')) {
@@ -117,7 +116,6 @@ class StreamingServer {
       if (peer) {
         console.log(`[server] Cleaning up ${peer.producers.length} producers and ${peer.consumers.length} consumers`);
         
-        // Clean up producers from streaming service first
         for (const producer of peer.producers) {
           await this.streamingService.cleanupProducer(producer.id);
           producer.close();
@@ -178,10 +176,8 @@ class StreamingServer {
   public async cleanup(): Promise<void> {
     console.log('[server] Starting cleanup...');
     
-    // Stop FFmpeg
     this.ffmpegService.stopFFmpeg();
     
-    // Close all peers
     for (const [peerId, peer] of this.peers) {
       peer.producers.forEach(producer => producer.close());
       peer.consumers.forEach(consumer => consumer.close());
@@ -190,10 +186,8 @@ class StreamingServer {
     }
     this.peers.clear();
     
-    // Cleanup streaming service
     await this.streamingService.stopFFmpegIfNoProducers();
     
-    // Cleanup MediaSoup (includes pre-allocated transports)
     await this.mediaSoupService.cleanup();
     
     console.log('[server] Cleanup completed');
@@ -202,7 +196,6 @@ class StreamingServer {
 
 const streamingServer = new StreamingServer();
 
-// Cleanup on process exit
 process.on('SIGINT', async () => {
   console.log('[server] SIGINT received, cleaning up...');
   await streamingServer.cleanup();

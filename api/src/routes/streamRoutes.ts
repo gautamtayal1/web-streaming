@@ -8,7 +8,6 @@ export function createStreamRoutes(
 ) {
   const router = express.Router();
 
-  // Health check endpoint
   router.get('/health', (_, res) => {
     res.json({ status: 'ok' });
   });
@@ -21,7 +20,7 @@ export function createStreamRoutes(
       
       res.json({ 
         streamId, 
-        hlsUrl: `/hls/stream.m3u8`, // Use single stream file like in your reference
+        hlsUrl: `/hls/stream.m3u8`,
         ports: {
           videoRtp: ffmpegStream.videoRtpPort,
           videoRtcp: ffmpegStream.videoRtcpPort,
@@ -40,7 +39,6 @@ export function createStreamRoutes(
     res.json({ streams: activeStreams });
   });
 
-  // Check if HLS stream file exists (for watch page)
   router.get('/stream-status', (_, res) => {
     const fs = require('fs');
     const path = require('path');

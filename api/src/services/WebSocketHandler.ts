@@ -73,13 +73,10 @@ export class WebSocketHandler {
       console.log(`[websocket] Producer ${producer.id} was not paused, should be producing immediately`);
     }
 
-    // Ensure producer is active and request keyframe immediately
     await producer.resume();
     console.log(`[websocket] Force resumed producer ${producer.id}, final state: paused=${producer.paused}`);
 
-    // Note: Keyframes are requested on the consumer side, not producer side
 
-    // Log RTP parameters to check codec configuration
     console.log(`[websocket] Producer RTP parameters:`, {
       codecs: producer.rtpParameters.codecs.map(c => ({ 
         mimeType: c.mimeType, 
@@ -96,7 +93,6 @@ export class WebSocketHandler {
       console.log(`[websocket] Producer ${producer.id} score update:`, score);
     });
     
-    // Start FFmpeg if this is the first producer (like reference)
     try {
       console.log(`[websocket] 🚀 Calling streamingService.startFFmpegForProducer...`);
       await this.streamingService.startFFmpegForProducer(producer, peerId);
