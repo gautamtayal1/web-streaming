@@ -4,12 +4,7 @@ import { FFmpegService } from "./FFmpegService";
 import * as mediasoup from "mediasoup";
 
 export class StreamingService {
-  private streamTransports = new Map<string, { video: mediasoup.types.PlainTransport, audio: mediasoup.types.PlainTransport }>();
-  private streamPorts = new Map<string, { videoPort: number, audioPort: number }>();
-  private rtpConsumers = new Map<string, mediasoup.types.Consumer>();
-  private producerToStreamId = new Map<string, string>();
-  private nextPortPair = 5004; // Starting port pair
-  private streamStartTimes = new Map<string, number>(); // Track stream start times
+  private producerAssignments = new Map<string, number>(); // producerId -> transportIndex
 
   constructor(
     private mediaSoupService: MediaSoupService,
@@ -19,218 +14,45 @@ export class StreamingService {
   ) {}
 
   async startFFmpegForProducer(producer: mediasoup.types.Producer, peerId: string): Promise<void> {
-    console.log(`[streaming] Starting FFmpeg for producer ${producer.id} (${producer.kind})`);
-    
-    if (!peerId) {
-      console.error(`[streaming] Invalid peerId for producer ${producer.id}`);
+    const transportIndex = this.getProducerTransportIndex(peerId);
+    if (transportIndex === -1) {
+      console.error(`Invalid peer index for peer ${peerId}`);
       return;
     }
 
-    const streamId = `stream_${peerId}`;
-    this.producerToStreamId.set(producer.id, streamId);
+    this.producerAssignments.set(producer.id, transportIndex);
+    await this.mediaSoupService.createRtpConsumer(producer, transportIndex);
     
-    // Initialize stream infrastructure for this specific peer/stream
-    await this.initializeStreamTransports(streamId);
-    
-    // Pipe this specific producer to RTP for FFmpeg consumption
-    console.log(`[streaming] Piping producer ${producer.id} to RTP for stream ${streamId}...`);
-    await this.pipeProducerToRtp(producer, streamId);
-    console.log(`[streaming] Producer ${producer.id} successfully piped to stream ${streamId}`);
-  }
-
-  private async initializeStreamTransports(streamId: string): Promise<void> {
-    if (this.streamTransports.has(streamId)) {
-      console.log(`[streaming] Stream ${streamId} already has transports`);
-      return;
-    }
-
-    const router = this.mediaSoupService.getRouter();
-    const videoPort = this.nextPortPair;
-    const audioPort = this.nextPortPair + 2;
-    this.nextPortPair += 4; // Reserve 4 ports per stream (video + rtcp, audio + rtcp)
-    
-    // Create video transport - MediaSoup will send RTP TO FFmpeg
-    const videoTransport = await router.createPlainTransport({
-      listenInfo: { protocol: "udp", ip: "127.0.0.1" },
-      rtcpMux: false,
-      comedia: false,
-      enableSrtp: false,
-      enableSctp: false
-    });
-    
-    // Create audio transport
-    const audioTransport = await router.createPlainTransport({
-      listenInfo: { protocol: "udp", ip: "127.0.0.1" },
-      rtcpMux: false,
-      comedia: false,
-      enableSrtp: false,
-      enableSctp: false
-    });
-
-    console.log(`[streaming] PlainTransports created for stream ${streamId}`);
-    console.log(`[streaming] Video transport: ${videoTransport.tuple.localIp}:${videoTransport.tuple.localPort} -> FFmpeg port ${videoPort}`);
-    console.log(`[streaming] Audio transport: ${audioTransport.tuple.localIp}:${audioTransport.tuple.localPort} -> FFmpeg port ${audioPort}`);
-
-    // Connect transports to send RTP to FFmpeg
-    await videoTransport.connect({ ip: '127.0.0.1', port: videoPort, rtcpPort: videoPort + 1 });
-    await audioTransport.connect({ ip: '127.0.0.1', port: audioPort, rtcpPort: audioPort + 1 });
-
-    this.streamTransports.set(streamId, { video: videoTransport, audio: audioTransport });
-    this.streamPorts.set(streamId, { videoPort, audioPort });
-    console.log(`[streaming] Stream ${streamId} transports connected`);
-  }
-
-  private async pipeProducerToRtp(producer: mediasoup.types.Producer, streamId: string): Promise<void> {
-    const transports = this.streamTransports.get(streamId);
-    if (!transports) return;
-
-    const transport = producer.kind === 'video' ? transports.video : transports.audio;
-    const router = this.mediaSoupService.getRouter();
-    
-    // Ensure all streams for the same ID start at synchronized timestamps
-    let startTime = this.streamStartTimes.get(streamId);
-    if (!startTime) {
-      startTime = Date.now();
-      this.streamStartTimes.set(streamId, startTime);
-      console.log(`[streaming] Setting synchronized start time for stream ${streamId}: ${startTime}`);
-    }
-    
-    const rtpConsumer = await transport.consume({
-      producerId: producer.id,
-      rtpCapabilities: router.rtpCapabilities,
-      paused: true, // Start paused to sync timestamps
-    });
-    
-    // Resume consumer to begin synchronized streaming
-    await rtpConsumer.resume();
-    
-    // Log detailed RTP parameters for debugging
-    console.log(`[streaming] Consumer created for ${producer.kind} in stream ${streamId}:`);
-    console.log(`[streaming] Codec: ${rtpConsumer.rtpParameters.codecs[0]?.mimeType}`);
-    console.log(`[streaming] Payload Type: ${rtpConsumer.rtpParameters.codecs[0]?.payloadType}`);
-    console.log(`[streaming] Clock Rate: ${rtpConsumer.rtpParameters.codecs[0]?.clockRate}`);
-    if (producer.kind === 'audio') {
-      console.log(`[streaming]   Channels: ${rtpConsumer.rtpParameters.codecs[0]?.channels}`);
-    }
-    
-    this.rtpConsumers.set(producer.id, rtpConsumer);
-    console.log(`[streaming] Producer ${producer.id} (${producer.kind}) piped to RTP transport for stream ${streamId}`);
-    
-    // Check if this stream now has both video and audio
-    await this.checkAndUpdateFFmpegStream(streamId);
-  }
-
-  private async checkAndUpdateFFmpegStream(streamId: string): Promise<void> {
-    const streamConsumers = this.getConsumersForStream(streamId);
-    const hasVideo = streamConsumers.some(c => c.kind === 'video');
-    const hasAudio = streamConsumers.some(c => c.kind === 'audio');
-    
-    console.log(`[streaming] Stream ${streamId} check: video=${hasVideo}, audio=${hasAudio}`);
-    
-    if (hasVideo && hasAudio) {
-      // Get port information for this stream
-      const ports = this.streamPorts.get(streamId)!;
-      
-      // Collect RTP parameters for this stream
-      const rtpParams = this.collectRtpParametersForStream(streamId);
-      
-      console.log(`[streaming] Adding complete stream ${streamId} to FFmpeg composition`);
-      await this.ffmpegService.addStream(streamId, ports.videoPort, ports.audioPort, rtpParams);
+    // Start FFmpeg if not already running (lazy start)
+    if (!this.ffmpegService.isRunning()) {
+      console.log(`[streaming] Starting FFmpeg for first producer`);
+      await this.ffmpegService.startWithStaticSDP();
     }
   }
 
-
-  private getConsumersForStream(streamId: string): mediasoup.types.Consumer[] {
-    const consumers: mediasoup.types.Consumer[] = [];
-    for (const [producerId, consumer] of this.rtpConsumers.entries()) {
-      if (this.producerToStreamId.get(producerId) === streamId) {
-        consumers.push(consumer);
+  private hasProducerOfKind(kind: string): boolean {
+    for (const peer of this.peers.values()) {
+      if (peer.producers.some(p => p.kind === kind)) {
+        return true;
       }
     }
-    return consumers;
+    return false;
   }
 
-  private collectRtpParametersForStream(streamId: string) {
-    const rtpParams: { video?: any, audio?: any } = {};
-    const streamConsumers = this.getConsumersForStream(streamId);
-    
-    for (const consumer of streamConsumers) {
-      const codec = consumer.rtpParameters.codecs[0];
-      if (consumer.kind === 'video') {
-        rtpParams.video = {
-          mimeType: codec.mimeType,
-          payloadType: codec.payloadType,
-          clockRate: codec.clockRate
-        };
-      } else if (consumer.kind === 'audio') {
-        rtpParams.audio = {
-          mimeType: codec.mimeType,
-          payloadType: codec.payloadType,
-          clockRate: codec.clockRate,
-          channels: codec.channels
-        };
-      }
-    }
-    
-    return rtpParams;
-  }
-
-
-  async stopFFmpegIfNoProducers(): Promise<void> {
-    const producerCount = this.getAllProducers().length;
-    console.log(`[streaming] Checking producers: ${producerCount} active`);
-    
-    if (producerCount === 0) {
-      console.log('[streaming] No producers left, stopping FFmpeg and cleaning up...');
-      this.ffmpegService.stopFFmpeg();
-      
-      console.log(`[streaming] Closing ${this.rtpConsumers.size} RTP consumers`);
-      this.rtpConsumers.forEach(consumer => consumer.close());
-      this.rtpConsumers.clear();
-      
-      console.log(`[streaming] Closing ${this.streamTransports.size} stream transports`);
-      for (const [streamId, transports] of this.streamTransports.entries()) {
-        transports.video.close();
-        transports.audio.close();
-      }
-      this.streamTransports.clear();
-      this.streamPorts.clear();
-      this.producerToStreamId.clear();
-      
-      console.log('[streaming] ✅ FFmpeg cleanup completed');
-    } else {
-      console.log(`[streaming] Still have ${producerCount} producers, keeping FFmpeg running`);
-    }
+  private getProducerTransportIndex(peerId: string): number {
+    const peerIds = Array.from(this.peers.keys());
+    const peerIndex = peerIds.indexOf(peerId);
+    return peerIndex > 1 ? -1 : peerIndex;
   }
 
   async cleanupProducer(producerId: string): Promise<void> {
-    const consumer = this.rtpConsumers.get(producerId);
-    const streamId = this.producerToStreamId.get(producerId);
-    
-    if (consumer) {
-      consumer.close();
-      this.rtpConsumers.delete(producerId);
-    }
-    
-    if (streamId) {
-      this.producerToStreamId.delete(producerId);
-      
-      // Check if this stream still has any producers
-      const streamStillHasProducers = Array.from(this.producerToStreamId.values()).includes(streamId);
-      
-      if (!streamStillHasProducers) {
-        console.log(`[streaming] Stream ${streamId} has no more producers, removing from FFmpeg`);
-        await this.ffmpegService.removeStream(streamId);
-        
-        // Clean up stream transports
-        const transports = this.streamTransports.get(streamId);
-        if (transports) {
-          transports.video.close();
-          transports.audio.close();
-          this.streamTransports.delete(streamId);
-          this.streamPorts.delete(streamId);
-        }
-      }
+    this.producerAssignments.delete(producerId);
+  }
+
+  async stopFFmpegIfNoProducers(): Promise<void> {
+    if (this.getAllProducers().length === 0) {
+      this.ffmpegService.stopFFmpeg();
+      this.producerAssignments.clear();
     }
   }
 
@@ -242,9 +64,8 @@ export class StreamingService {
     return allProducers;
   }
 
-
-  // Legacy methods for compatibility
-  async createFFmpegStream(streamId: string): Promise<FFmpegStream> {
+  // Legacy methods
+  async createFFmpegStream(_streamId: string): Promise<FFmpegStream> {
     throw new Error("Use startFFmpegForProducer instead");
   }
 
@@ -253,7 +74,7 @@ export class StreamingService {
   }
 
   getActiveStreams() {
-    const hasActiveProducers = this.getAllProducers().length > 0;
-    return hasActiveProducers && this.ffmpegService.isRunning() ? [{ streamId: "main", hlsUrl: "/hls/stream.m3u8" }] : [];
+    return this.getAllProducers().length > 0 && this.ffmpegService.isRunning() 
+      ? [{ streamId: "main", hlsUrl: "/hls/stream.m3u8" }] : [];
   }
 }

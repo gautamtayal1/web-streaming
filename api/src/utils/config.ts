@@ -9,8 +9,8 @@ export const MEDIASOUP_CONFIG = {
   },
   webRtcServer: {
     listenInfos: [
-      { protocol: "udp" as const, ip: "127.0.0.1", port: 20000 },
-      { protocol: "tcp" as const, ip: "127.0.0.1", port: 20001 }
+      { protocol: "udp" as const, ip: "127.0.0.1", port: 40000 },
+      { protocol: "tcp" as const, ip: "127.0.0.1", port: 40001 }
     ]
   },
   router: {

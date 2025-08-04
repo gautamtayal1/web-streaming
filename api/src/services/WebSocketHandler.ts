@@ -57,15 +57,44 @@ export class WebSocketHandler {
     
     const { kind, rtpParameters } = data;
     console.log(`[websocket] 🎥 Creating ${kind} producer for peer ${peerId}`);
+    console.log(`[websocket] RTP parameters:`, {
+      codecs: rtpParameters.codecs?.map((c: any) => ({ mimeType: c.mimeType, payloadType: c.payloadType })),
+      encodings: rtpParameters.encodings?.length || 0
+    });
     
     const producer = await peer.sendTransport.produce({ kind, rtpParameters });
     
+    console.log(`[websocket] Producer created with state: paused=${producer.paused}, closed=${producer.closed}`);
+    
     if (producer.paused) {
       await producer.resume();
+      console.log(`[websocket] Producer ${producer.id} resumed successfully`);
+    } else {
+      console.log(`[websocket] Producer ${producer.id} was not paused, should be producing immediately`);
     }
+
+    // Ensure producer is active and request keyframe immediately
+    await producer.resume();
+    console.log(`[websocket] Force resumed producer ${producer.id}, final state: paused=${producer.paused}`);
+
+    // Note: Keyframes are requested on the consumer side, not producer side
+
+    // Log RTP parameters to check codec configuration
+    console.log(`[websocket] Producer RTP parameters:`, {
+      codecs: producer.rtpParameters.codecs.map(c => ({ 
+        mimeType: c.mimeType, 
+        payloadType: c.payloadType,
+        clockRate: c.clockRate 
+      })),
+      encodings: producer.rtpParameters.encodings
+    });
     
     peer.producers.push(producer);
     console.log(`[websocket] ✅ Producer created: ${producer.id} (${kind})`);
+    
+    producer.on('score', (score) => {
+      console.log(`[websocket] Producer ${producer.id} score update:`, score);
+    });
     
     // Start FFmpeg if this is the first producer (like reference)
     try {
