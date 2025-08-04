@@ -67,7 +67,7 @@ class StreamingServer {
   }
 
   private setupRoutes(): void {
-    const streamRoutes = createStreamRoutes(this.streamingService, this.ffmpegStreams);
+    const streamRoutes = createStreamRoutes();
     this.app.use('/', streamRoutes);
   }
 

@@ -79,58 +79,54 @@ export class FFmpegService {
     
     this.createStaticSdpFile(staticSdpPath);
 
-    const ffmpegArgs: string[] = [];
-
-    ffmpegArgs.push('-protocol_whitelist', 'file,udp,rtp');
-    ffmpegArgs.push('-fflags', '+genpts+discardcorrupt+igndts+flush_packets');
-    ffmpegArgs.push('-analyzeduration', '500000');   
-    ffmpegArgs.push('-probesize', '500000');         
-    ffmpegArgs.push('-max_delay', '50000');          
-    ffmpegArgs.push('-buffer_size', '16384');        
-    ffmpegArgs.push('-thread_queue_size', '512');    
-    ffmpegArgs.push('-avoid_negative_ts', 'make_zero');
-    ffmpegArgs.push('-reorder_queue_size', '0');     
-    ffmpegArgs.push('-rtbufsize', '16M');            
-    ffmpegArgs.push('-use_wallclock_as_timestamps', '1');
-
-    ffmpegArgs.push('-i', staticSdpPath);
-    ffmpegArgs.push('-r', '30');
-
-    ffmpegArgs.push('-filter_complex',
+    const ffmpegArgs = [
+      '-protocol_whitelist', 'file,udp,rtp',
+      '-fflags', '+genpts+discardcorrupt+igndts+flush_packets',
+      '-analyzeduration', '500000',
+      '-probesize', '500000',
+      '-max_delay', '50000',
+      '-buffer_size', '16384',
+      '-thread_queue_size', '512',
+      '-avoid_negative_ts', 'make_zero',
+      '-reorder_queue_size', '0',
+      '-rtbufsize', '16M',
+      '-use_wallclock_as_timestamps', '1',
+      '-i', staticSdpPath,
+      '-r', '30',
+      '-filter_complex',
       '[0:0]scale=640:480:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=640:480:(ow-iw)/2:(oh-ih)/2,fps=30[v0]; ' +
       '[0:2]scale=640:480:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=640:480:(ow-iw)/2:(oh-ih)/2,fps=30[v1]; ' +
       '[v0][v1]hstack=inputs=2[v]; ' +
-      '[0:1][0:3]amerge=inputs=2,aresample=48000[a]'
-    );
-    ffmpegArgs.push('-map', '[v]');
-    ffmpegArgs.push('-map', '[a]');
-    ffmpegArgs.push('-c:v', 'libx264');
-    ffmpegArgs.push('-preset', 'medium');
-    ffmpegArgs.push('-tune', 'zerolatency');
-    ffmpegArgs.push('-pix_fmt', 'yuv420p');
-    ffmpegArgs.push('-g', '30');
-    ffmpegArgs.push('-sc_threshold', '0');
-    ffmpegArgs.push('-bf', '2');
-    ffmpegArgs.push('-refs', '3');
-    ffmpegArgs.push('-crf', '23');
-    ffmpegArgs.push('-maxrate', '2000k');
-    ffmpegArgs.push('-bufsize', '4000k');
-    ffmpegArgs.push('-threads', '4');
-    ffmpegArgs.push('-x264opts', 'keyint=30:min-keyint=30:no-scenecut');
-
-    ffmpegArgs.push('-c:a', 'aac');
-    ffmpegArgs.push('-ar', '48000');
-    ffmpegArgs.push('-ac', '2');
-    ffmpegArgs.push('-b:a', '128k');
-    ffmpegArgs.push('-profile:a', 'aac_low');
-    ffmpegArgs.push('-f', 'hls');
-    ffmpegArgs.push('-hls_time', '2');
-    ffmpegArgs.push('-hls_list_size', '5');
-    ffmpegArgs.push('-hls_flags', 'delete_segments+independent_segments');
-    ffmpegArgs.push('-hls_allow_cache', '0');
-    ffmpegArgs.push('-hls_segment_type', 'mpegts');
-    ffmpegArgs.push('-hls_segment_filename', join(this.hlsDir, 'stream%d.ts'));
-    ffmpegArgs.push(join(this.hlsDir, 'stream.m3u8'));
+      '[0:1][0:3]amerge=inputs=2,aresample=48000[a]',
+      '-map', '[v]',
+      '-map', '[a]',
+      '-c:v', 'libx264',
+      '-preset', 'medium',
+      '-tune', 'zerolatency',
+      '-pix_fmt', 'yuv420p',
+      '-g', '30',
+      '-sc_threshold', '0',
+      '-bf', '2',
+      '-refs', '3',
+      '-crf', '23',
+      '-maxrate', '2000k',
+      '-bufsize', '4000k',
+      '-threads', '4',
+      '-x264opts', 'keyint=30:min-keyint=30:no-scenecut',
+      '-c:a', 'aac',
+      '-ar', '48000',
+      '-ac', '2',
+      '-b:a', '128k',
+      '-profile:a', 'aac_low',
+      '-f', 'hls',
+      '-hls_time', '2',
+      '-hls_list_size', '5',
+      '-hls_flags', 'delete_segments+independent_segments',
+      '-hls_allow_cache', '0',
+      '-hls_segment_type', 'mpegts',
+      '-hls_segment_filename', join(this.hlsDir, 'stream%d.ts'),
+      join(this.hlsDir, 'stream.m3u8')
+    ];
 
     console.log(`[ffmpeg] Static SDP command: ffmpeg ${ffmpegArgs.join(' ')}`);
     this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
@@ -179,6 +175,4 @@ a=recvonly`;
   isRunning(): boolean {
     return this.ffmpegProcess !== null;
   }
-
-
 }
