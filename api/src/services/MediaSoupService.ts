@@ -49,13 +49,6 @@ export class MediaSoupService {
     });
   }
 
-  canConsume(params: {
-    producerId: string;
-    rtpCapabilities: mediasoup.types.RtpCapabilities;
-  }): boolean {
-    return this.router.canConsume(params);
-  }
-
   async createRtpConsumer(
     producer: mediasoup.types.Producer,
     transportIndex: number
@@ -74,45 +67,30 @@ export class MediaSoupService {
         return null;
       }
 
-      console.log(`Producer stats before creating consumer:`, {
-        id: producer.id,
-        kind: producer.kind,
-        paused: producer.paused,
-        closed: producer.closed,
-        score: producer.score
-      });
-
       const consumer = await rtpTransport.consume({
         producerId: producer.id,
         rtpCapabilities: this.getRtpCapabilities(),
       });
 
-      this.logConsumerCreation(producer, consumer, transportIndex);
-      this.setupConsumerEventHandlers(consumer, producer.id);
 
       if (consumer.paused) {
         await consumer.resume();
-        console.log(`RTP consumer resumed for ${producer.kind}`);
       }
       
       await consumer.resume();
-      console.log(`RTP consumer force resumed for ${producer.kind}`);
       
       if (producer.kind === 'video') {
         await consumer.requestKeyFrame();
-        console.log(`Initial keyframe requested for video consumer`);
         
         setTimeout(async () => {
           if (!consumer.closed && !producer.closed) {
             await consumer.requestKeyFrame();
-            console.log(`Secondary keyframe requested for video consumer`);
           }
         }, 1000);
         
         setTimeout(async () => {
           if (!consumer.closed && !producer.closed) {
             await consumer.requestKeyFrame();
-            console.log(`Tertiary keyframe requested for video consumer`);
           }
         }, 3000);
       }
@@ -171,7 +149,6 @@ export class MediaSoupService {
     try {
       await this.createVideoTransports();
       await this.createAudioTransports();
-      console.log("All RTP transports initialized successfully");
     } catch (error) {
       console.error("Failed to initialize RTP transports:", error);
       throw error;
@@ -183,13 +160,11 @@ export class MediaSoupService {
       this.FIXED_PORTS.video[0]
     );
     this.rtpTransports.videoTransports.push(videoTransport1);
-    console.log(`Video RTP transport 1 connected on port ${this.FIXED_PORTS.video[0]}`);
 
     const videoTransport2 = await this.createAndConnectPlainTransport(
       this.FIXED_PORTS.video[1]
     );
     this.rtpTransports.videoTransports.push(videoTransport2);
-    console.log(`Video RTP transport 2 connected on port ${this.FIXED_PORTS.video[1]}`);
   }
 
   private async createAudioTransports(): Promise<void> {
@@ -197,13 +172,11 @@ export class MediaSoupService {
       this.FIXED_PORTS.audio[0]
     );
     this.rtpTransports.audioTransports.push(audioTransport1);
-    console.log(`Audio RTP transport 1 connected on port ${this.FIXED_PORTS.audio[0]}`);
 
     const audioTransport2 = await this.createAndConnectPlainTransport(
       this.FIXED_PORTS.audio[1]
     );
     this.rtpTransports.audioTransports.push(audioTransport2);
-    console.log(`Audio RTP transport 2 connected on port ${this.FIXED_PORTS.audio[1]}`);
   }
 
   private async createAndConnectPlainTransport(port: number): Promise<mediasoup.types.PlainTransport> {
@@ -219,35 +192,7 @@ export class MediaSoupService {
       rtcpPort: port + 1,
     });
 
-    console.log(`PlainTransport connected to send RTP to ${this.FIXED_PORTS.listenIp}:${port}`);
     return transport;
   }
 
-  private logConsumerCreation(
-    producer: mediasoup.types.Producer,
-    consumer: mediasoup.types.Consumer,
-    transportIndex: number
-  ): void {
-    const ports = producer.kind === "video"
-      ? this.FIXED_PORTS.video
-      : this.FIXED_PORTS.audio;
-
-    console.log(`Created RTP consumer for ${producer.kind}:`, {
-      producerId: producer.id,
-      consumerId: consumer.id,
-      transportIndex: transportIndex,
-      port: ports[transportIndex],
-      payloadType: consumer.rtpParameters.codecs[0]?.payloadType,
-    });
-  }
-
-  private setupConsumerEventHandlers(consumer: mediasoup.types.Consumer, producerId: string): void {
-    consumer.on("transportclose", () => {
-      console.log(`RTP consumer closed for producer ${producerId}`);
-    });
-
-    consumer.on("producerclose", () => {
-      console.log(`RTP consumer closed due to producer close for ${producerId}`);
-    });
-  }
 }

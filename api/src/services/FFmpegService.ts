@@ -41,7 +41,6 @@ export class FFmpegService {
     });
   }
 
-
   private setupFFmpegHandlers(): void {
     if (!this.ffmpegProcess) return;
 
@@ -53,24 +52,12 @@ export class FFmpegService {
       console.log(`[ffmpeg] Process exited with code: ${code}, signal: ${signal}`);
       this.ffmpegProcess = null;
     });
-    
-    this.ffmpegProcess.stderr?.on('data', (data) => {
-      const output = data.toString();
-      console.log('[ffmpeg] stderr:', output.trim());
-    });
-
-    this.ffmpegProcess.stdout?.on('data', (data) => {
-      console.log('[ffmpeg] stdout:', data.toString());
-    });
   }
 
   async startWithStaticSDP(): Promise<void> {
     if (this.ffmpegProcess) {
-      console.log('[ffmpeg] FFmpeg already running, stopping first...');
-      await this.stopFFmpegGracefully();
+        await this.stopFFmpegGracefully();
     }
-
-    console.log('[ffmpeg] Starting FFmpeg with static SDP configuration');
     this.startStaticFFmpeg();
   }
 
@@ -128,9 +115,7 @@ export class FFmpegService {
       join(this.hlsDir, 'stream.m3u8')
     ];
 
-    console.log(`[ffmpeg] Static SDP command: ffmpeg ${ffmpegArgs.join(' ')}`);
     this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
-
     this.setupFFmpegHandlers();
   }
 
@@ -158,12 +143,8 @@ a=fmtp:100 maxplaybackrate=48000;stereo=1;useinbandfec=1
 a=recvonly`;
 
     writeFileSync(sdpPath, sdpContent);
-    console.log(`[ffmpeg] Created static SDP file: ${sdpPath}`);
   }
 
-  async startFFmpegWithParams(_videoPort: number, _audioPort: number, _rtpParams: any): Promise<ChildProcess> {
-    throw new Error("Use startWithStaticSDP instead - dynamic port allocation has been replaced with pre-allocation");
-  }
 
   stopFFmpeg(): void {
     if (this.ffmpegProcess) {

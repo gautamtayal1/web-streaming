@@ -76,7 +76,6 @@ class StreamingServer {
     
     wss.on("connection", (socket) => {
       const peerId = crypto.randomUUID();
-      console.log(`[server] 🔌 New WebSocket connection: ${peerId}`);
       
       this.peers.set(peerId, { 
         socket: socket as unknown as WebSocket, 
@@ -111,10 +110,8 @@ class StreamingServer {
 
   private setupSocketCleanup(socket: any, peerId: string): void {
     socket.on("close", async () => {
-      console.log(`[server] WebSocket closed for peer: ${peerId}`);
       const peer = this.peers.get(peerId);
       if (peer) {
-        console.log(`[server] Cleaning up ${peer.producers.length} producers and ${peer.consumers.length} consumers`);
         
         for (const producer of peer.producers) {
           await this.streamingService.cleanupProducer(producer.id);
@@ -127,9 +124,7 @@ class StreamingServer {
       }
       this.peers.delete(peerId);
       
-      console.log(`[server] Remaining peers: ${this.peers.size}`);
       if (this.peers.size === 0) {
-        console.log(`[server] No peers left, stopping FFmpeg...`);
         this.streamingService.cleanupFFmpegStreams();
       }
     });
@@ -137,36 +132,19 @@ class StreamingServer {
 
   public async start(): Promise<void> {
     try {
-      console.log('[server] Initializing MediaSoup service...');
       await this.mediaSoupService.initialize();
-      console.log('[server] MediaSoup service initialized successfully');
-      
-      console.log('[server] Initializing other services...');
       this.initializeServices();
-      console.log('[server] Services initialized successfully');
-      
-      console.log('[server] FFmpeg will start when first user connects (lazy initialization)');
-      
-      console.log('[server] Setting up routes...');
       this.setupRoutes();
-      console.log('[server] Routes set up successfully');
       
-      console.log('[server] Starting HTTP server...');
       const server = this.app.listen(SERVER_CONFIG.port, '0.0.0.0', () => {
-        console.log(`[server] HTTP server running on http://localhost:${SERVER_CONFIG.port}`);
-        console.log(`[server] Server bound to 0.0.0.0:${SERVER_CONFIG.port}`);
+        console.log(`[server] Server running on http://localhost:${SERVER_CONFIG.port}`);
       });
       
       server.on('error', (error) => {
         console.error('[server] HTTP server error:', error);
       });
-
-      console.log('[server] Setting up WebSocket server...');
       this.setupWebSocketServer(server);
-      console.log('[server] WebSocket server set up successfully');
-      
-      console.log('[server] ✅ Server startup completed successfully');
-      
+
     } catch (error) {
       console.error('[server] ❌ Server startup failed:', error);
       throw error;
@@ -174,7 +152,6 @@ class StreamingServer {
   }
 
   public async cleanup(): Promise<void> {
-    console.log('[server] Starting cleanup...');
     
     this.ffmpegService.stopFFmpeg();
     
@@ -187,10 +164,26 @@ class StreamingServer {
     this.peers.clear();
     
     await this.streamingService.stopFFmpegIfNoProducers();
-    
     await this.mediaSoupService.cleanup();
     
-    console.log('[server] Cleanup completed');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    this.cleanupHlsFiles();
+  }
+
+  private cleanupHlsFiles(): void {
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(this.hlsDir)) {
+        const files = fs.readdirSync(this.hlsDir);
+        files.forEach((file: string) => {
+          if (file.endsWith('.m3u8') || file.endsWith('.ts') || file.endsWith('.sdp')) {
+            fs.unlinkSync(join(this.hlsDir, file));
+          }
+        });
+      }
+    } catch (error) {
+      console.error('[server] Error cleaning HLS files:', error);
+    }
   }
 }
 

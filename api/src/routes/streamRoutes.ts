@@ -2,8 +2,6 @@ import express from "express";
 
 export function createStreamRoutes() {
   const router = express.Router();
-
-
   router.get('/stream-status', (_, res) => {
     const fs = require('fs');
     const path = require('path');
@@ -16,6 +14,5 @@ export function createStreamRoutes() {
       hlsUrl: exists ? '/hls/stream.m3u8' : null 
     });
   });
-
   return router;
 }

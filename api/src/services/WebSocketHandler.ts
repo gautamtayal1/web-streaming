@@ -56,51 +56,20 @@ export class WebSocketHandler {
     if (!peer.sendTransport) return;
     
     const { kind, rtpParameters } = data;
-    console.log(`[websocket] 🎥 Creating ${kind} producer for peer ${peerId}`);
-    console.log(`[websocket] RTP parameters:`, {
-      codecs: rtpParameters.codecs?.map((c: any) => ({ mimeType: c.mimeType, payloadType: c.payloadType })),
-      encodings: rtpParameters.encodings?.length || 0
-    });
     
     const producer = await peer.sendTransport.produce({ kind, rtpParameters });
-    
-    console.log(`[websocket] Producer created with state: paused=${producer.paused}, closed=${producer.closed}`);
-    
     if (producer.paused) {
       await producer.resume();
-      console.log(`[websocket] Producer ${producer.id} resumed successfully`);
     } else {
-      console.log(`[websocket] Producer ${producer.id} was not paused, should be producing immediately`);
     }
-
     await producer.resume();
-    console.log(`[websocket] Force resumed producer ${producer.id}, final state: paused=${producer.paused}`);
-
-
-    console.log(`[websocket] Producer RTP parameters:`, {
-      codecs: producer.rtpParameters.codecs.map(c => ({ 
-        mimeType: c.mimeType, 
-        payloadType: c.payloadType,
-        clockRate: c.clockRate 
-      })),
-      encodings: producer.rtpParameters.encodings
-    });
-    
     peer.producers.push(producer);
-    console.log(`[websocket] ✅ Producer created: ${producer.id} (${kind})`);
-    
-    producer.on('score', (score) => {
-      console.log(`[websocket] Producer ${producer.id} score update:`, score);
-    });
     
     try {
-      console.log(`[websocket] 🚀 Calling streamingService.startFFmpegForProducer...`);
       await this.streamingService.startFFmpegForProducer(producer, peerId);
-      console.log(`[websocket] ✅ FFmpeg process initiated for producer ${producer.id}`);
     } catch (error) {
       console.error(`[websocket] ❌ Failed to start FFmpeg for producer ${producer.id}:`, error);
     }
-    
     socket.send(JSON.stringify({
       type: "produced",
       data: { producerId: producer.id }

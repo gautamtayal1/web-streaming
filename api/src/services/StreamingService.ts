@@ -24,18 +24,8 @@ export class StreamingService {
     await this.mediaSoupService.createRtpConsumer(producer, transportIndex);
     
     if (!this.ffmpegService.isRunning()) {
-      console.log(`[streaming] Starting FFmpeg for first producer`);
       await this.ffmpegService.startWithStaticSDP();
     }
-  }
-
-  private hasProducerOfKind(kind: string): boolean {
-    for (const peer of this.peers.values()) {
-      if (peer.producers.some(p => p.kind === kind)) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private getProducerTransportIndex(peerId: string): number {
@@ -63,16 +53,8 @@ export class StreamingService {
     return allProducers;
   }
 
-  async createFFmpegStream(_streamId: string): Promise<FFmpegStream> {
-    throw new Error("Use startFFmpegForProducer instead");
-  }
-
   cleanupFFmpegStreams(): void {
     this.stopFFmpegIfNoProducers();
   }
 
-  getActiveStreams() {
-    return this.getAllProducers().length > 0 && this.ffmpegService.isRunning() 
-      ? [{ streamId: "main", hlsUrl: "/hls/stream.m3u8" }] : [];
-  }
 }
