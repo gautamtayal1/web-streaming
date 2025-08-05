@@ -58,12 +58,8 @@ export class FFmpegService {
     if (this.ffmpegProcess) {
         await this.stopFFmpegGracefully();
     }
-    this.startStaticFFmpeg();
-  }
-
-  private startStaticFFmpeg(): void {
-    const staticSdpPath = join(this.hlsDir, 'stream.sdp');
     
+    const staticSdpPath = join(this.hlsDir, 'stream.sdp');
     this.createStaticSdpFile(staticSdpPath);
 
     const ffmpegArgs = [
@@ -141,7 +137,6 @@ m=audio 5010 RTP/AVP 100
 a=rtpmap:100 opus/48000/2
 a=fmtp:100 maxplaybackrate=48000;stereo=1;useinbandfec=1
 a=recvonly`;
-
     writeFileSync(sdpPath, sdpContent);
   }
 

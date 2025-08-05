@@ -1,14 +1,17 @@
-import { Peer } from "../utils/types";
+import { Peer, WSMessage } from "../utils/types";
 import { MediaSoupService } from "./MediaSoupService";
+import { StreamingService } from "./StreamingService";
+import { WebSocket } from "ws";
+import * as mediasoup from "mediasoup";
 
 export class WebSocketHandler {
   constructor(
     private mediaSoupService: MediaSoupService,
     private peers: Map<string, Peer>,
-    private streamingService: any
+    private streamingService: StreamingService
   ) {}
 
-  async handleMessage(msg: any, peer: Peer, socket: any, peerId: string): Promise<void> {
+  async handleMessage(msg: WSMessage, peer: Peer, socket: WebSocket, peerId: string): Promise<void> {
     switch (msg.type) {
       case "createSendTransport":
         await this.handleCreateSendTransport(peer, socket);
@@ -31,7 +34,7 @@ export class WebSocketHandler {
     }
   }
 
-  private async handleCreateSendTransport(peer: Peer, socket: any): Promise<void> {
+  private async handleCreateSendTransport(peer: Peer, socket: WebSocket): Promise<void> {
     const transport = await this.mediaSoupService.createWebRtcTransport();
     peer.sendTransport = transport;
     
@@ -46,23 +49,26 @@ export class WebSocketHandler {
     }));
   }
 
-  private async handleConnectSendTransport(peer: Peer, dtlsParameters: any): Promise<void> {
+  private async handleConnectSendTransport(peer: Peer, dtlsParameters: mediasoup.types.DtlsParameters): Promise<void> {
     if (peer.sendTransport) {
       await peer.sendTransport.connect({ dtlsParameters });
     }
   }
 
-  private async handleProduce(peer: Peer, socket: any, data: any, peerId: string): Promise<void> {
+  private async handleProduce(
+    peer: Peer, 
+    socket: WebSocket, 
+    data: { 
+      kind: mediasoup.types.MediaKind, 
+      rtpParameters: mediasoup.types.RtpParameters }, 
+      peerId: string
+    ): Promise<void> {
+        
     if (!peer.sendTransport) return;
     
     const { kind, rtpParameters } = data;
     
     const producer = await peer.sendTransport.produce({ kind, rtpParameters });
-    if (producer.paused) {
-      await producer.resume();
-    } else {
-    }
-    await producer.resume();
     peer.producers.push(producer);
     
     try {
@@ -78,7 +84,7 @@ export class WebSocketHandler {
     this.notifyOtherPeersOfNewProducer(peerId, producer.id, kind);
   }
 
-  private async handleCreateRecvTransport(peer: Peer, socket: any): Promise<void> {
+  private async handleCreateRecvTransport(peer: Peer, socket: WebSocket): Promise<void> {
     const transport = await this.mediaSoupService.createWebRtcTransport();
     peer.recvTransport = transport;
     
@@ -93,13 +99,17 @@ export class WebSocketHandler {
     }));
   }
 
-  private async handleConnectRecvTransport(peer: Peer, dtlsParameters: any): Promise<void> {
+  private async handleConnectRecvTransport(peer: Peer, dtlsParameters: mediasoup.types.DtlsParameters): Promise<void> {
     if (peer.recvTransport) {
       await peer.recvTransport.connect({ dtlsParameters });
     }
   }
 
-  private async handleConsume(peer: Peer, socket: any, data: any): Promise<void> {
+  private async handleConsume(
+    peer: Peer,
+    socket: WebSocket,
+    data: { producerId: string, rtpCapabilities: mediasoup.types.RtpCapabilities }
+  ): Promise<void> {
     if (!peer.recvTransport) return;
     
     const { producerId, rtpCapabilities } = data;
@@ -113,12 +123,10 @@ export class WebSocketHandler {
     const consumer = await peer.recvTransport.consume({
       producerId,
       rtpCapabilities,
-      paused: true
     });
     
-    await consumer.resume();
     peer.consumers.push(consumer);
-    
+
     socket.send(JSON.stringify({
       type: "consumed",
       data: {
@@ -140,7 +148,7 @@ export class WebSocketHandler {
     }
   }
 
-  notifyExistingProducers(socket: any, peerId: string): void {
+  notifyExistingProducers(socket: WebSocket, peerId: string): void {
     for (const [otherPeerId, otherPeer] of this.peers) {
       if (otherPeerId === peerId) continue;
       for (const producer of otherPeer.producers) {

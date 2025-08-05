@@ -14,7 +14,6 @@ export class MediaSoupService {
     videoTransports: [],
     audioTransports: [],
   };
-
   private readonly FIXED_PORTS = {
     video: [5004, 5008],
     audio: [5006, 5010],
@@ -72,27 +71,8 @@ export class MediaSoupService {
         rtpCapabilities: this.getRtpCapabilities(),
       });
 
-
-      if (consumer.paused) {
-        await consumer.resume();
-      }
-      
-      await consumer.resume();
-      
       if (producer.kind === 'video') {
         await consumer.requestKeyFrame();
-        
-        setTimeout(async () => {
-          if (!consumer.closed && !producer.closed) {
-            await consumer.requestKeyFrame();
-          }
-        }, 1000);
-        
-        setTimeout(async () => {
-          if (!consumer.closed && !producer.closed) {
-            await consumer.requestKeyFrame();
-          }
-        }, 3000);
       }
 
       return consumer;
@@ -131,7 +111,6 @@ export class MediaSoupService {
       console.error("MediaSoup worker has died");
       setTimeout(() => process.exit(1), 2000);
     });
-
     console.info("MediaSoup worker created");
   }
 
@@ -194,5 +173,4 @@ export class MediaSoupService {
 
     return transport;
   }
-
 }

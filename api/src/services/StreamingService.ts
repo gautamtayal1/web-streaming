@@ -10,12 +10,11 @@ export class StreamingService {
     private mediaSoupService: MediaSoupService,
     private ffmpegService: FFmpegService,
     private peers: Map<string, Peer>,
-    private ffmpegStreams: Map<string, FFmpegStream>
   ) {}
 
   async startFFmpegForProducer(producer: mediasoup.types.Producer, peerId: string): Promise<void> {
     const transportIndex = this.getProducerTransportIndex(peerId);
-    if (transportIndex === -1) {
+    if (transportIndex > 1) {
       console.error(`Invalid peer index for peer ${peerId}`);
       return;
     }
@@ -30,8 +29,7 @@ export class StreamingService {
 
   private getProducerTransportIndex(peerId: string): number {
     const peerIds = Array.from(this.peers.keys());
-    const peerIndex = peerIds.indexOf(peerId);
-    return peerIndex > 1 ? -1 : peerIndex;
+    return peerIds.indexOf(peerId);
   }
 
   async cleanupProducer(producerId: string): Promise<void> {
@@ -56,5 +54,4 @@ export class StreamingService {
   cleanupFFmpegStreams(): void {
     this.stopFFmpegIfNoProducers();
   }
-
 }

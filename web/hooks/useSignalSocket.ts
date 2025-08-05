@@ -50,7 +50,7 @@ export function useSignalSocket(onMessage: (msg: WSMessage) => void) {
     return () => ws.close();
   }, []);
 
-  const send = useCallback((msg: unknown) => {
+  const send = useCallback((msg: WSMessage) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(msg));
     }

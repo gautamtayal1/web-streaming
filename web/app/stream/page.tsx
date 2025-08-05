@@ -161,7 +161,6 @@ export default function StreamPage() {
       .catch(error => console.error("Failed to get user media:", error));
   }, []);
 
-
   return (
     <div className="min-h-screen flex flex-col justify-center items-center bg-black p-4">
       <div className="w-[90vw] h-[90vh] flex gap-4 justify-center items-center">

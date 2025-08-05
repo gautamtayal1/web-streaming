@@ -3,7 +3,7 @@ import { WebSocketServer } from "ws";
 import { join } from "path";
 import { mkdirSync, existsSync } from "fs";
 import cors from "cors";
-
+import { WebSocket } from "ws";
 import { MediaSoupService } from "./services/MediaSoupService";
 import { FFmpegService } from "./services/FFmpegService";
 import { StreamingService } from "./services/StreamingService";
@@ -11,6 +11,7 @@ import { WebSocketHandler } from "./services/WebSocketHandler";
 import { createStreamRoutes } from "./routes/streamRoutes";
 import { Peer, FFmpegStream } from "./utils/types";
 import { SERVER_CONFIG } from "./utils/config";
+import http from "http";
 
 class StreamingServer {
   private app = express();
@@ -55,8 +56,7 @@ class StreamingServer {
     this.streamingService = new StreamingService(
       this.mediaSoupService,
       this.ffmpegService,
-      this.peers,
-      this.ffmpegStreams
+      this.peers
     );
 
     this.webSocketHandler = new WebSocketHandler(
@@ -71,17 +71,20 @@ class StreamingServer {
     this.app.use('/', streamRoutes);
   }
 
-  private setupWebSocketServer(server: any): void {
+  private setupWebSocketServer(server: http.Server): void {
     const wss = new WebSocketServer({ server });
     
     wss.on("connection", (socket) => {
       const peerId = crypto.randomUUID();
       
       this.peers.set(peerId, { 
-        socket: socket as unknown as WebSocket, 
+        socket: socket, 
         producers: [], 
         consumers: [] 
       });
+
+      this.setupSocketHandlers(socket, peerId);
+      this.setupSocketCleanup(socket, peerId);
 
       socket.send(JSON.stringify({
         type: "routerRtpCapabilities",
@@ -89,12 +92,10 @@ class StreamingServer {
       }));
 
       this.webSocketHandler.notifyExistingProducers(socket, peerId);
-      this.setupSocketHandlers(socket, peerId);
-      this.setupSocketCleanup(socket, peerId);
     });
   }
 
-  private setupSocketHandlers(socket: any, peerId: string): void {
+  private setupSocketHandlers(socket: WebSocket, peerId: string): void {
     socket.on("message", async (msgRaw: Buffer) => {
       try {
         const msg = JSON.parse(msgRaw.toString());
@@ -108,7 +109,7 @@ class StreamingServer {
     });
   }
 
-  private setupSocketCleanup(socket: any, peerId: string): void {
+  private setupSocketCleanup(socket: WebSocket, peerId: string): void {
     socket.on("close", async () => {
       const peer = this.peers.get(peerId);
       if (peer) {
@@ -133,7 +134,6 @@ class StreamingServer {
   public async start(): Promise<void> {
     try {
       await this.mediaSoupService.initialize();
-      this.initializeServices();
       this.setupRoutes();
       
       const server = this.app.listen(SERVER_CONFIG.port, '0.0.0.0', () => {
@@ -143,8 +143,10 @@ class StreamingServer {
       server.on('error', (error) => {
         console.error('[server] HTTP server error:', error);
       });
+      
+      this.initializeServices();
       this.setupWebSocketServer(server);
-
+      
     } catch (error) {
       console.error('[server] ❌ Server startup failed:', error);
       throw error;
@@ -152,7 +154,6 @@ class StreamingServer {
   }
 
   public async cleanup(): Promise<void> {
-    
     this.ffmpegService.stopFFmpeg();
     
     for (const [peerId, peer] of this.peers) {
